@@ -1,145 +1,187 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll } from '@/lib/supabase'
-import { getSystemMetadata } from '@/lib/migrations'
+import { supabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const cid = campaignId || null
 
-    const lastViews = await getSystemMetadata('last_views_refresh')
-    const lastRanking = await getSystemMetadata('last_ranking_refresh')
+    let lastViews: any = null
+    let lastRanking: any = null
+    try {
+      const { data: lv } = await supabase.from('system_metadata').select('value, updated_at').eq('key', 'last_views_refresh').single()
+      lastViews = lv
+      const { data: lr } = await supabase.from('system_metadata').select('value, updated_at').eq('key', 'last_ranking_refresh').single()
+      lastRanking = lr
+    } catch {}
 
-    const kwCount = await queryAll<any>(
-      cid ? `SELECT COUNT(*) as cnt FROM keywords WHERE status = 'active' AND campaign_id = $1` : `SELECT COUNT(*) as cnt FROM keywords WHERE status = 'active'`,
-      cid ? [cid] : []
-    )
-    const kvCount = await queryAll<any>(
-      cid ? `SELECT COUNT(*) as cnt FROM keyword_videos WHERE campaign_id = $1` : `SELECT COUNT(*) as cnt FROM keyword_videos`,
-      cid ? [cid] : []
-    )
-    const ksCount = await queryAll<any>(
-      cid ? `SELECT COUNT(*) as cnt FROM keyword_shorts WHERE campaign_id = $1` : `SELECT COUNT(*) as cnt FROM keyword_shorts`,
-      cid ? [cid] : []
-    )
+    let kwQuery = supabase.from('keywords').select('id', { count: 'exact', head: true }).eq('status', 'active')
+    if (cid) kwQuery = kwQuery.eq('campaign_id', cid)
+    const { count: kwCountVal } = await kwQuery
 
-    const kwCountVal = kwCount?.[0]?.cnt ?? 0
-    const kvCountVal = kvCount?.[0]?.cnt ?? 0
-    const ksCountVal = ksCount?.[0]?.cnt ?? 0
-    const totalVideos = kvCountVal + ksCountVal
+    let kvQuery = supabase.from('keyword_videos').select('id', { count: 'exact', head: true })
+    if (cid) kvQuery = kvQuery.eq('campaign_id', cid)
+    const { count: kvCountVal } = await kvQuery
 
-    const vsToday = await queryAll<any>(
-      cid ? `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE AND campaign_id = $1` : `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE`,
-      cid ? [cid] : []
-    )
-    const vs1d = await queryAll<any>(
-      cid ? `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '1 day' AND campaign_id = $1` : `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '1 day'`,
-      cid ? [cid] : []
-    )
-    const vs7d = await queryAll<any>(
-      cid ? `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '7 days' AND campaign_id = $1` : `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '7 days'`,
-      cid ? [cid] : []
-    )
-    const vs30d = await queryAll<any>(
-      cid ? `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '30 days' AND campaign_id = $1` : `SELECT COALESCE(SUM(view_count), 0) as total_views FROM view_snapshots WHERE snapshot_date = CURRENT_DATE - INTERVAL '30 days'`,
-      cid ? [cid] : []
-    )
+    let ksQuery = supabase.from('keyword_shorts').select('id', { count: 'exact', head: true })
+    if (cid) ksQuery = ksQuery.eq('campaign_id', cid)
+    const { count: ksCountVal } = await ksQuery
 
-    const uniqueStats = cid
-      ? await queryAll<any>(`SELECT COUNT(DISTINCT v.id) as unique_count, COALESCE(SUM(v.view_count), 0) as total_viewership, COUNT(DISTINCT v.channel_name) as unique_channels FROM (SELECT video_id FROM keyword_videos WHERE campaign_id = $1 UNION ALL SELECT video_id FROM keyword_shorts WHERE campaign_id = $1) uv INNER JOIN videos v ON v.id = uv.video_id`, [cid, cid])
-      : await queryAll<any>(`SELECT COUNT(DISTINCT v.id) as unique_count, COALESCE(SUM(v.view_count), 0) as total_viewership, COUNT(DISTINCT v.channel_name) as unique_channels FROM (SELECT video_id FROM keyword_videos UNION ALL SELECT video_id FROM keyword_shorts) uv INNER JOIN videos v ON v.id = uv.video_id`)
+    const totalVideos = (kvCountVal || 0) + (ksCountVal || 0)
 
-    const vs = uniqueStats?.[0] || {} as any
+    const today = new Date().toISOString().split('T')[0]
+    const d1 = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+    const d7 = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+    const d30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
 
-    const topChannels = cid
-      ? await queryAll<any>(`SELECT v.channel_name, COUNT(*) as freq FROM keyword_videos kv INNER JOIN videos v ON v.id = kv.video_id WHERE kv.campaign_id = $1 GROUP BY v.channel_name ORDER BY freq DESC LIMIT 1`, [cid])
-      : await queryAll<any>(`SELECT v.channel_name, COUNT(*) as freq FROM keyword_videos kv INNER JOIN videos v ON v.id = kv.video_id WHERE kv.campaign_id IS NOT NULL GROUP BY v.channel_name ORDER BY freq DESC LIMIT 1`)
+    async function sumViews(dateStr: string): Promise<number> {
+      let q = supabase.from('view_snapshots').select('view_count').eq('snapshot_date', dateStr)
+      if (cid) q = q.eq('campaign_id', cid)
+      const { data } = await q
+      return (data || []).reduce((sum: number, r: any) => sum + (r.view_count || 0), 0)
+    }
 
-    const newVids = cid
-      ? await queryAll<any>(`SELECT COUNT(*) as cnt FROM campaign_videos WHERE first_seen_at >= NOW() - INTERVAL '7 days' AND campaign_id = $1`, [cid])
-      : await queryAll<any>(`SELECT COUNT(*) as cnt FROM campaign_videos WHERE first_seen_at >= NOW() - INTERVAL '7 days'`)
+    const [vsToday, vs1d, vs7d, vs30d] = await Promise.all([sumViews(today), sumViews(d1), sumViews(d7), sumViews(d30)])
 
-    const untagged = await queryAll<any>(`SELECT COUNT(*) as cnt FROM videos WHERE is_deleted = FALSE AND (tags IS NULL OR tags = '{}'::text[])`)
+    let kvForStats = supabase.from('keyword_videos').select('video_id')
+    let ksForStats = supabase.from('keyword_shorts').select('video_id')
+    if (cid) {
+      kvForStats = kvForStats.eq('campaign_id', cid)
+      ksForStats = ksForStats.eq('campaign_id', cid)
+    }
+    const [kvRes, ksRes] = await Promise.all([kvForStats, ksForStats])
+    const allVideoIds = [...new Set([...(kvRes.data || []).map((r: any) => r.video_id), ...(ksRes.data || []).map((r: any) => r.video_id)])]
 
-    const brandStats = cid
-      ? await queryAll<any>(`SELECT bt.brand_name, SUM(v.view_count) as brand_views, COUNT(DISTINCT bt.video_id) as video_count FROM brand_tags bt INNER JOIN videos v ON v.id = bt.video_id WHERE bt.campaign_id = $1 GROUP BY bt.brand_name ORDER BY brand_views DESC`, [cid])
-      : await queryAll<any>(`SELECT bt.brand_name, SUM(v.view_count) as brand_views, COUNT(DISTINCT bt.video_id) as video_count FROM brand_tags bt INNER JOIN videos v ON v.id = bt.video_id GROUP BY bt.brand_name ORDER BY brand_views DESC`)
+    let unique_count = 0
+    let total_viewership = 0
+    let unique_channels = 0
 
-    const activeJobs = await queryAll<any>(`SELECT COUNT(*) as cnt FROM scrape_jobs WHERE status IN ('running', 'pending')`)
-    const totalVids = await queryAll<any>(`SELECT COUNT(*) as cnt FROM videos WHERE is_deleted = FALSE`)
-    const transcriptsCount = await queryAll<any>(`SELECT COUNT(*) as cnt FROM video_transcripts WHERE fetch_status = 'success'`)
+    if (allVideoIds.length > 0) {
+      const BATCH = 500
+      const videoRows: any[] = []
+      for (let i = 0; i < allVideoIds.length; i += BATCH) {
+        const batch = allVideoIds.slice(i, i + BATCH)
+        const { data } = await supabase.from('videos').select('id, view_count, channel_name').in('id', batch)
+        videoRows.push(...(data || []))
+      }
+      const uniqueChannels = new Set<string>()
+      videoRows.forEach((v: any) => {
+        total_viewership += v.view_count || 0
+        if (v.channel_name) uniqueChannels.add(v.channel_name)
+      })
+      unique_count = videoRows.length
+      unique_channels = uniqueChannels.size
+    }
 
-    const totalViewership = vs.total_viewership || 0
-    const totalBrandViews = (brandStats || []).reduce((sum: number, b: any) => sum + (b.brand_views || 0), 0) || 1
-    const top5ByViewership = (brandStats || []).slice(0, 5).map((b: any) => ({
+    const vs = { unique_count, total_viewership, unique_channels }
+
+    let topChannels: any = null
+    if (allVideoIds.length > 0) {
+      const BATCH = 500
+      const channelFreq = new Map<string, number>()
+      for (let i = 0; i < allVideoIds.length; i += BATCH) {
+        const batch = allVideoIds.slice(i, i + BATCH)
+        const { data } = await supabase.from('videos').select('channel_name').in('id', batch)
+        for (const v of (data || []) as any[]) {
+          if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
+        }
+      }
+      let maxFreq = 0
+      let maxChannel = ''
+      for (const [ch, freq] of channelFreq) {
+        if (freq > maxFreq) { maxFreq = freq; maxChannel = ch }
+      }
+      if (maxChannel) topChannels = [{ channel_name: maxChannel, freq: maxFreq }]
+    }
+
+    let cvQuery = supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true })
+    if (cid) cvQuery = cvQuery.eq('campaign_id', cid)
+    cvQuery = cvQuery.gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString())
+    const { count: newVidsVal } = await cvQuery
+
+    let untaggedQuery = supabase.from('videos').select('id', { count: 'exact', head: true }).eq('is_deleted', false).or('tags.is.null,tags.eq.{}')
+    const { count: untaggedVal } = await untaggedQuery
+
+    let btQuery = supabase.from('brand_tags').select('brand_name, video_id')
+    if (cid) btQuery = btQuery.eq('campaign_id', cid)
+    const { data: brandTags } = await btQuery
+
+    const brandVideoIds = [...new Set((brandTags || []).map((bt: any) => bt.video_id))]
+    const brandVideoMap = new Map<string, { view_count: number }>()
+    if (brandVideoIds.length > 0) {
+      const BATCH = 500
+      for (let i = 0; i < brandVideoIds.length; i += BATCH) {
+        const batch = brandVideoIds.slice(i, i + BATCH)
+        const { data } = await supabase.from('videos').select('id, view_count').in('id', batch)
+        for (const v of (data || []) as any[]) brandVideoMap.set(v.id, v)
+      }
+    }
+
+    const brandStatsMap = new Map<string, { brand_views: number; video_count: number }>()
+    for (const bt of (brandTags || []) as any[]) {
+      if (!brandStatsMap.has(bt.brand_name)) brandStatsMap.set(bt.brand_name, { brand_views: 0, video_count: 0 })
+      const m = brandStatsMap.get(bt.brand_name)!
+      m.brand_views += brandVideoMap.get(bt.video_id)?.view_count || 0
+      m.video_count++
+    }
+    const brandStats = Array.from(brandStatsMap.entries())
+      .map(([brand_name, m]) => ({ brand_name, ...m }))
+      .sort((a: any, b: any) => b.brand_views - a.brand_views)
+
+    const totalBrandViews = brandStats.reduce((sum: number, b: any) => sum + (b.brand_views || 0), 0) || 1
+    const top5ByViewership = brandStats.slice(0, 5).map((b: any) => ({
       brand_name: b.brand_name,
       brand_total_views: b.brand_views || 0,
       sov_percent: totalBrandViews > 0 ? Math.round(((b.brand_views || 0) / totalBrandViews) * 1000) / 10 : 0,
       video_count: b.video_count || 0,
     }))
 
-    const totalBrandMentions = (brandStats || []).reduce((sum: number, b: any) => sum + (b.video_count || 0), 0) || 1
-    const top5ByFrequency = (brandStats || []).slice(0, 5).map((b: any) => ({
+    const totalBrandMentions = brandStats.reduce((sum: number, b: any) => sum + (b.video_count || 0), 0) || 1
+    const top5ByFrequency = brandStats.slice(0, 5).map((b: any) => ({
       brand_name: b.brand_name,
       brand_total_freq: b.video_count || 0,
       freq_sov_percent: Math.round(((b.video_count || 0) / totalBrandMentions) * 1000) / 10,
       video_count: b.video_count || 0,
     }))
 
-    const totalVidsVal = totalVids?.[0]?.cnt ?? 0
-    const transcriptsVal = transcriptsCount?.[0]?.cnt ?? 0
+    const totalVidsVal = allVideoIds.length
+    let transcriptsVal = 0
+    try {
+      const { count } = await supabase.from('video_transcripts').select('video_id', { count: 'exact', head: true }).eq('fetch_status', 'success')
+      transcriptsVal = count || 0
+    } catch {}
     const transcriptCoverage = totalVidsVal > 0 ? Math.round((transcriptsVal / totalVidsVal) * 100) : 0
 
-    const dailyViewsRows = cid
-      ? await queryAll<any>(
-          `SELECT snapshot_date::text as date, SUM(view_count) as views
-           FROM view_snapshots WHERE campaign_id = $1 AND snapshot_date >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY snapshot_date ORDER BY snapshot_date ASC`, [cid])
-      : await queryAll<any>(
-          `SELECT snapshot_date::text as date, SUM(view_count) as views
-           FROM view_snapshots WHERE snapshot_date >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY snapshot_date ORDER BY snapshot_date ASC`)
+    let activeJobsVal = 0
+    try {
+      const { count } = await supabase.from('scrape_jobs').select('id', { count: 'exact', head: true }).in('status', ['running', 'pending'])
+      activeJobsVal = count || 0
+    } catch {}
 
-    const dailyNewVideos = cid
-      ? await queryAll<any>(
-          `SELECT first_seen_at::date::text as date, COUNT(*) as count
-           FROM campaign_videos WHERE campaign_id = $1 AND first_seen_at >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY first_seen_at::date ORDER BY first_seen_at::date ASC`, [cid])
-      : await queryAll<any>(
-          `SELECT first_seen_at::date::text as date, COUNT(*) as count
-           FROM campaign_videos WHERE first_seen_at >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY first_seen_at::date ORDER BY first_seen_at::date ASC`)
-
-    const dailyKeywordsAdded = cid
-      ? await queryAll<any>(
-          `SELECT created_at::date::text as date, COUNT(*) as count
-           FROM keywords WHERE campaign_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY created_at::date ORDER BY created_at::date ASC`, [cid])
-      : await queryAll<any>(
-          `SELECT created_at::date::text as date, COUNT(*) as count
-           FROM keywords WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
-           GROUP BY created_at::date ORDER BY created_at::date ASC`)
+    const dailyViewsRows = await getDailyData('view_snapshots', 'snapshot_date', 'view_count', cid, 'SUM')
+    const dailyNewVideos = await getDailyData('campaign_videos', 'first_seen_at', 'video_id', cid, 'COUNT')
+    const dailyKeywordsAdded = await getDailyData('keywords', 'created_at', 'id', cid, 'COUNT')
 
     return NextResponse.json({
       lastUpdatedViews: lastViews,
       lastUpdatedRanking: lastRanking,
-      totalKeywords: kwCountVal,
+      totalKeywords: kwCountVal || 0,
       totalVideos,
-      totalViewership,
-      uniqueVideos: vs.unique_count || 0,
-      uniqueVideoViewership: totalViewership,
-      uniqueChannels: vs.unique_channels || 0,
+      totalViewership: vs.total_viewership,
+      uniqueVideos: vs.unique_count,
+      uniqueVideoViewership: vs.total_viewership,
+      uniqueChannels: vs.unique_channels,
       mostRankingChannel: topChannels?.[0] ? { name: topChannels[0].channel_name, totalFrequency: topChannels[0].freq } : null,
-      newVideosLast7Days: newVids?.[0]?.cnt || 0,
-      untaggedVideos: untagged?.[0]?.cnt || 0,
+      newVideosLast7Days: newVidsVal || 0,
+      untaggedVideos: untaggedVal || 0,
       top5ByViewership,
       top5ByFrequency,
       growth: {
-        h24: pctChange(vsToday?.[0]?.total_views || 0, vs1d?.[0]?.total_views || 0),
-        d7: pctChange(vsToday?.[0]?.total_views || 0, vs7d?.[0]?.total_views || 0),
-        d30: pctChange(vsToday?.[0]?.total_views || 0, vs30d?.[0]?.total_views || 0),
+        h24: pctChange(vsToday, vs1d),
+        d7: pctChange(vsToday, vs7d),
+        d30: pctChange(vsToday, vs30d),
       },
-      activeScrapingJobs: activeJobs?.[0]?.cnt || 0,
+      activeScrapingJobs: activeJobsVal,
       transcriptCoverage,
       dailyViews: dailyViewsRows,
       dailyNewVideos,
@@ -147,8 +189,41 @@ export async function GET(req: NextRequest) {
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Overview API error:', e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
+}
+
+async function getDailyData(
+  table: string,
+  dateCol: string,
+  valueCol: string,
+  campaignId: string | null,
+  agg: 'SUM' | 'COUNT'
+): Promise<{ date: string; views?: number; count?: number }[]> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+
+  let q = supabase.from(table).select(`${dateCol}, ${valueCol}`)
+  if (campaignId) q = q.eq('campaign_id', campaignId)
+  q = q.gte(dateCol, thirtyDaysAgo).order(dateCol, { ascending: true })
+
+  const { data } = await q
+  if (!data || data.length === 0) return []
+
+  const grouped = new Map<string, number[]>()
+  for (const row of data as any[]) {
+    const rawDate = row[dateCol]
+    const dateStr = typeof rawDate === 'string' ? rawDate.split('T')[0] : String(rawDate)
+    if (!grouped.has(dateStr)) grouped.set(dateStr, [])
+    grouped.get(dateStr)!.push(agg === 'COUNT' ? 1 : (row[valueCol] || 0))
+  }
+
+  return Array.from(grouped.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, vals]) => ({
+      date,
+      ...(agg === 'SUM' ? { views: vals.reduce((s, v) => s + v, 0) } : { count: vals.length }),
+    }))
 }
 
 function pctChange(now: number, prev: number) {

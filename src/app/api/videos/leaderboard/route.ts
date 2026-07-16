@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll, queryOne } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,33 +16,21 @@ export async function GET(req: NextRequest) {
 
     const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
 
-    let kwConditions = ['TRUE']
-    const kwParams: any[] = []
-    let kwParamIdx = 1
-    if (campaignId) {
-      kwConditions.push(`kv.campaign_id = $${kwParamIdx++}`)
-      kwParams.push(campaignId)
-    }
-    if (keywordId) {
-      kwConditions.push(`kv.keyword_id = $${kwParamIdx++}`)
-      kwParams.push(keywordId)
-    }
-    const kwWhere = kwConditions.join(' AND ')
+    let kvQuery = supabase
+      .from(kvTable)
+      .select('video_id, keyword_id, rank, discovered_at, last_seen_at')
 
-    const rankedVideos = await queryAll<{
-      video_id: string
-      keyword_id: string
-      rank: number
-      discovered_at: string
-      last_seen_at: string
-    }>(
-      `SELECT kv.video_id, kv.keyword_id, kv.rank, kv.discovered_at, kv.last_seen_at
-       FROM ${kvTable} kv
-       WHERE ${kwWhere}`,
-      kwParams
-    )
+    if (campaignId) kvQuery = kvQuery.eq('campaign_id', campaignId)
+    if (keywordId) kvQuery = kvQuery.eq('keyword_id', keywordId)
 
-    if (rankedVideos.length === 0) {
+    const { data: rankedVideos, error: kvError } = await kvQuery
+
+    if (kvError) {
+      console.error('Leaderboard KV query error:', kvError)
+      return NextResponse.json({ error: kvError.message, data: [], total: 0, channels: [] }, { status: 500 })
+    }
+
+    if (!rankedVideos || rankedVideos.length === 0) {
       return NextResponse.json({ data: [], total: 0, channels: [] })
     }
 
@@ -51,18 +39,26 @@ export async function GET(req: NextRequest) {
     const keywordIdSet = new Set(rankedVideos.map(r => r.keyword_id))
     const keywordIds = Array.from(keywordIdSet)
 
-    const videos = await queryAll<any>(
-      `SELECT id, youtube_id, title, channel_name, channel_id, tags,
-              view_count, duration, duration_sec, thumbnail_url, published_at
-       FROM videos WHERE id = ANY($1)`,
-      [videoIds]
-    )
+    const { data: videos, error: vidError } = await supabase
+      .from('videos')
+      .select('id, youtube_id, title, channel_name, channel_id, tags, view_count, duration, duration_sec, thumbnail_url, published_at')
+      .in('id', videoIds)
 
-    const keywordRows = await queryAll<{ id: string; text: string }>(
-      `SELECT id, text FROM keywords WHERE id = ANY($1)`,
-      [keywordIds]
-    )
-    const keywordTextMap = new Map(keywordRows.map(k => [k.id, k.text]))
+    if (vidError) {
+      console.error('Leaderboard videos query error:', vidError)
+      return NextResponse.json({ error: vidError.message, data: [], total: 0, channels: [] }, { status: 500 })
+    }
+
+    const { data: keywordRows, error: kwError } = await supabase
+      .from('keywords')
+      .select('id, text')
+      .in('id', keywordIds)
+
+    if (kwError) {
+      console.error('Leaderboard keywords query error:', kwError)
+    }
+
+    const keywordTextMap = new Map((keywordRows || []).map((k: any) => [k.id, k.text]))
 
     const videoKeywordMap = new Map<string, { keyword_text: string; rank: number }[]>()
     for (const r of rankedVideos) {
@@ -81,46 +77,20 @@ export async function GET(req: NextRequest) {
       videoStatsMap.set(vid, { best_rank: bestRank, keyword_count: kwCount, discovered_at: discovered, last_seen_at: lastSeen })
     }
 
-    let videoMap = new Map(videos.map(v => [v.id, v]))
-
-    let vConditions = ['TRUE']
-    const vParams: any[] = []
-    let vParamIdx = 1
-    if (brandName) {
-      vConditions.push(`v.id IN (SELECT video_id FROM brand_tags WHERE brand_name = $${vParamIdx++}${campaignId ? ` AND campaign_id = $${vParamIdx++}` : ''})`)
-      vParams.push(brandName)
-      if (campaignId) vParams.push(campaignId)
-    }
-    if (channelName) {
-      vConditions.push(`v.channel_name = $${vParamIdx++}`)
-      vParams.push(channelName)
-    }
-    if (search) {
-      vConditions.push(`(v.title ILIKE $${vParamIdx} OR v.channel_name ILIKE $${vParamIdx})`)
-      vParams.push(`%${search}%`)
-      vParamIdx++
-    }
-    vConditions.push(`v.id = ANY($${vParamIdx++})`)
-    vParams.push(videoIds)
-
-    if (vConditions.length > 1) {
-      const filtered = await queryAll<{ id: string }>(
-        `SELECT id FROM videos v WHERE ${vConditions.join(' AND ')}`,
-        vParams
-      )
-      const filteredIds = new Set(filtered.map(f => f.id))
-      videoIds.filter(id => filteredIds.has(id))
-    }
+    const videoMap = new Map((videos || []).map((v: any) => [v.id, v]))
 
     let brandMap = new Map<string, string[]>()
-    const brandRows = await queryAll<{ video_id: string; brand_name: string }>(
-      `SELECT video_id::text, brand_name FROM brand_tags WHERE video_id::text = ANY($1)`,
-      [videoIds]
-    )
-    for (const br of brandRows) {
-      if (!brandMap.has(br.video_id)) brandMap.set(br.video_id, [])
-      brandMap.get(br.video_id)!.push(br.brand_name)
-    }
+    try {
+      const { data: brandRows } = await supabase
+        .from('brand_tags')
+        .select('video_id, brand_name')
+        .in('video_id', videoIds)
+
+      for (const br of (brandRows || []) as any[]) {
+        if (!brandMap.has(br.video_id)) brandMap.set(br.video_id, [])
+        brandMap.get(br.video_id)!.push(br.brand_name)
+      }
+    } catch {}
 
     let enriched = videoIds.map(vid => {
       const v = videoMap.get(vid)
@@ -157,6 +127,16 @@ export async function GET(req: NextRequest) {
     if (brandName) {
       enriched = enriched.filter(v => v.brands.includes(brandName))
     }
+    if (channelName) {
+      enriched = enriched.filter(v => v.channel_name === channelName)
+    }
+    if (search) {
+      const q = search.toLowerCase()
+      enriched = enriched.filter(v =>
+        (v.title || '').toLowerCase().includes(q) ||
+        (v.channel_name || '').toLowerCase().includes(q)
+      )
+    }
 
     const sortFn = sort === 'rank'
       ? (a: any, b: any) => a.best_rank - b.best_rank
@@ -174,6 +154,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data: paginated, total, channels })
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    console.error('Leaderboard API error:', e)
+    return NextResponse.json({ error: e.message, data: [], total: 0, channels: [] }, { status: 500 })
   }
 }
