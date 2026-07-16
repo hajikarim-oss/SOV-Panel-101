@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ExternalLink, Download, ChevronUp, ChevronDown, Search, Loader2, AlertCircle, Plus, X, Tag, Brain } from 'lucide-react'
+import { ExternalLink, Download, ChevronUp, ChevronDown, Search, AlertCircle, Plus, X, Tag, Brain, Loader2 } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
+import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
 interface KeywordRank {
@@ -171,15 +172,22 @@ export default function LeaderboardPage() {
     fetchCampaigns()
   }, [fetchCampaigns])
 
+  // Campaign-level data: only refetch when campaign changes
+  useEffect(() => {
+    if (activeCampaignId) {
+      fetchBrands(activeCampaignId)
+      fetchKeywords(activeCampaignId)
+    }
+  }, [activeCampaignId, fetchBrands, fetchKeywords])
+
+  // Filter-dependent data: refetch when filters change
   useEffect(() => {
     if (activeCampaignId) {
       fetchVideos(activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel)
-      fetchBrands(activeCampaignId)
-      fetchKeywords(activeCampaignId)
     } else {
       setLoading(false)
     }
-  }, [activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, fetchVideos, fetchBrands, fetchKeywords])
+  }, [activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, fetchVideos])
 
   const handleUpdateTags = async (youtubeId: string, newTags: string[]) => {
     if (!activeCampaignId) return
@@ -257,10 +265,8 @@ export default function LeaderboardPage() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 12 }}>
-        <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
-        <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading video leaderboard…</div>
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <div className="anim-fade-up">
+        <PageSkeleton cols={4} rows={10} />
       </div>
     )
   }

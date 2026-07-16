@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, TrendingDown, Minus, Download, Loader2, AlertCircle, RefreshCw, Zap } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, Download, AlertCircle, RefreshCw, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, Legend } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
 const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
@@ -75,10 +76,8 @@ export default function BrandGrowthPage() {
   }
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', flexDirection: 'column', gap: 12 }}>
-      <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
-      <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading brand growth analysis…</div>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    <div className="anim-fade-up">
+      <PageSkeleton cols={2} rows={4} />
     </div>
   )
 

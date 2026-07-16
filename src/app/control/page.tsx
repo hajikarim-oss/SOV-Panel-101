@@ -181,14 +181,17 @@ export default function ControlPage() {
   // ── Fetch keywords + jobs for active campaign ──────────────────────────────
   const fetchCampaignDetail = useCallback(async (id: string) => {
     try {
-      const r = await fetch(`/api/campaigns/${id}`)
-      const d = await r.json()
-      setKeywords(d.keywords ?? [])
-      setJobs(d.jobs ?? [])
-
-      const rb = await fetch(`/api/brands?campaign_id=${id}`)
-      const dbData = await rb.json()
-      setBrands(dbData.data ?? [])
+      const [campaignRes, brandsRes] = await Promise.all([
+        fetch(`/api/campaigns/${id}`),
+        fetch(`/api/brands?campaign_id=${id}`),
+      ])
+      const [campaignData, brandsData] = await Promise.all([
+        campaignRes.json(),
+        brandsRes.json(),
+      ])
+      setKeywords(campaignData.keywords ?? [])
+      setJobs(campaignData.jobs ?? [])
+      setBrands(brandsData.data ?? [])
     } catch { showToast('Failed to load campaign keywords and brands', 'error') }
   }, [showToast])
 

@@ -6,7 +6,8 @@ import {
   Legend, PieChart, Pie, Cell
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { Loader2, AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X } from 'lucide-react'
+import { AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X, Loader2 } from 'lucide-react'
+import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
 const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
@@ -159,10 +160,8 @@ export default function KeywordSovPage() {
   }
 
   if (loading) return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 12 }}>
-      <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
-      <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading keyword SOV data…</div>
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    <div className="anim-fade-up">
+      <PageSkeleton cols={4} rows={5} />
     </div>
   )
 

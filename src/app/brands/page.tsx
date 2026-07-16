@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { PageSkeleton } from '@/components/PageSkeleton'
 import { Loader2, Eye, Hash, TrendingUp, Award, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 
@@ -92,10 +93,7 @@ export default function BrandIntelligencePage() {
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', gap: 12 }}>
-          <Loader2 size={32} style={{ color: 'var(--blue)', animation: 'spin 1s linear infinite' }} />
-          <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading brand intelligence…</div>
-        </div>
+        <PageSkeleton cols={4} rows={5} />
       ) : sortedBrands.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
           <Award size={36} style={{ color: '#CBD5E1', marginBottom: 12 }} />

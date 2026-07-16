@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Video, Search, Loader2, ExternalLink, ChevronLeft, ChevronRight, Tag, Brain, AlertCircle, Check } from 'lucide-react'
+import { Video, Search, ExternalLink, ChevronLeft, ChevronRight, Tag, Brain, AlertCircle, Check, Loader2 } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
+import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
 interface PendingVideo {
@@ -158,10 +159,7 @@ export default function PendingTaggingPage() {
       </div>
 
       {loading ? (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', gap: 12 }}>
-          <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
-          <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading untagged videos…</div>
-        </div>
+        <PageSkeleton cols={3} rows={8} />
       ) : error ? (
         <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
       ) : data.length === 0 ? (
