@@ -5,7 +5,7 @@ export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const sort = req.nextUrl.searchParams.get('sort') ?? 'views'
-    const tab = req.nextUrl.searchParams.get('tab') ?? 'all'
+    const tab = req.nextUrl.searchParams.get('tab') ?? 'long'
     const page = parseInt(req.nextUrl.searchParams.get('page') ?? '1')
     const limit = parseInt(req.nextUrl.searchParams.get('limit') ?? '20')
     const brandName = req.nextUrl.searchParams.get('brand_name')
@@ -14,143 +14,121 @@ export async function GET(req: NextRequest) {
     const search = req.nextUrl.searchParams.get('q')
     const offset = (page - 1) * limit
 
-    let conditions = ['TRUE']
-    const params: any[] = []
-    let paramIdx = 1
+    const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
 
+    let kwConditions = ['TRUE']
+    const kwParams: any[] = []
+    let kwParamIdx = 1
     if (campaignId) {
-      conditions.push(`kv.campaign_id = $${paramIdx++}`)
-      params.push(campaignId)
-    }
-    if (brandName) {
-      conditions.push(`v.id IN (SELECT video_id FROM brand_tags WHERE brand_name = $${paramIdx++}${campaignId ? ` AND campaign_id = $${paramIdx++}` : ''})`)
-      params.push(brandName)
-      if (campaignId) params.push(campaignId)
+      kwConditions.push(`kv.campaign_id = $${kwParamIdx++}`)
+      kwParams.push(campaignId)
     }
     if (keywordId) {
-      conditions.push(`kv.keyword_id = $${paramIdx++}`)
-      params.push(keywordId)
+      kwConditions.push(`kv.keyword_id = $${kwParamIdx++}`)
+      kwParams.push(keywordId)
+    }
+    const kwWhere = kwConditions.join(' AND ')
+
+    const rankedVideos = await queryAll<{
+      video_id: string
+      keyword_id: string
+      rank: number
+      discovered_at: string
+      last_seen_at: string
+    }>(
+      `SELECT kv.video_id, kv.keyword_id, kv.rank, kv.discovered_at, kv.last_seen_at
+       FROM ${kvTable} kv
+       WHERE ${kwWhere}`,
+      kwParams
+    )
+
+    if (rankedVideos.length === 0) {
+      return NextResponse.json({ data: [], total: 0, channels: [] })
+    }
+
+    const videoIdSet = new Set(rankedVideos.map(r => r.video_id))
+    const videoIds = Array.from(videoIdSet)
+    const keywordIdSet = new Set(rankedVideos.map(r => r.keyword_id))
+    const keywordIds = Array.from(keywordIdSet)
+
+    const videos = await queryAll<any>(
+      `SELECT id, youtube_id, title, channel_name, channel_id, tags,
+              view_count, duration, duration_sec, thumbnail_url, published_at
+       FROM videos WHERE id = ANY($1)`,
+      [videoIds]
+    )
+
+    const keywordRows = await queryAll<{ id: string; text: string }>(
+      `SELECT id, text FROM keywords WHERE id = ANY($1)`,
+      [keywordIds]
+    )
+    const keywordTextMap = new Map(keywordRows.map(k => [k.id, k.text]))
+
+    const videoKeywordMap = new Map<string, { keyword_text: string; rank: number }[]>()
+    for (const r of rankedVideos) {
+      const kwText = keywordTextMap.get(r.keyword_id) || r.keyword_id
+      if (!videoKeywordMap.has(r.video_id)) videoKeywordMap.set(r.video_id, [])
+      videoKeywordMap.get(r.video_id)!.push({ keyword_text: kwText, rank: r.rank })
+    }
+
+    const videoStatsMap = new Map<string, { best_rank: number; keyword_count: number; discovered_at: string; last_seen_at: string }>()
+    for (const [vid, ranks] of videoKeywordMap) {
+      const bestRank = Math.min(...ranks.map(r => r.rank))
+      const kwCount = ranks.length
+      const videoRanks = rankedVideos.filter(r => r.video_id === vid)
+      const discovered = videoRanks.reduce((min, r) => !min || r.discovered_at < min ? r.discovered_at : min, '')
+      const lastSeen = videoRanks.reduce((max, r) => !max || r.last_seen_at > max ? r.last_seen_at : max, '')
+      videoStatsMap.set(vid, { best_rank: bestRank, keyword_count: kwCount, discovered_at: discovered, last_seen_at: lastSeen })
+    }
+
+    let videoMap = new Map(videos.map(v => [v.id, v]))
+
+    let vConditions = ['TRUE']
+    const vParams: any[] = []
+    let vParamIdx = 1
+    if (brandName) {
+      vConditions.push(`v.id IN (SELECT video_id FROM brand_tags WHERE brand_name = $${vParamIdx++}${campaignId ? ` AND campaign_id = $${vParamIdx++}` : ''})`)
+      vParams.push(brandName)
+      if (campaignId) vParams.push(campaignId)
     }
     if (channelName) {
-      conditions.push(`v.channel_name = $${paramIdx++}`)
-      params.push(channelName)
+      vConditions.push(`v.channel_name = $${vParamIdx++}`)
+      vParams.push(channelName)
     }
     if (search) {
-      conditions.push(`(v.title ILIKE $${paramIdx} OR v.channel_name ILIKE $${paramIdx})`)
-      params.push(`%${search}%`)
-      paramIdx++
+      vConditions.push(`(v.title ILIKE $${vParamIdx} OR v.channel_name ILIKE $${vParamIdx})`)
+      vParams.push(`%${search}%`)
+      vParamIdx++
     }
+    vConditions.push(`v.id = ANY($${vParamIdx++})`)
+    vParams.push(videoIds)
 
-    const whereClause = conditions.join(' AND ')
-
-    const orderBy = sort === 'rank'
-      ? 'best_rank ASC'
-      : sort === 'views'
-        ? 'v.view_count DESC'
-        : 'keyword_count DESC'
-
-    const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
-    const isShortExpr = tab === 'short' ? 'TRUE' : 'FALSE'
-
-    let fromClause: string
-    if (tab === 'all') {
-      fromClause = `(
-        SELECT kv.video_id, kv.rank, kv.keyword_id, kv.campaign_id, kv.discovered_at, kv.last_seen_at, FALSE as is_short FROM keyword_videos kv
-        UNION ALL
-        SELECT ks.video_id, ks.rank, ks.keyword_id, ks.campaign_id, ks.discovered_at, ks.last_seen_at, TRUE as is_short FROM keyword_shorts ks
-      ) kv`
-    } else {
-      fromClause = `${kvTable} kv`
+    if (vConditions.length > 1) {
+      const filtered = await queryAll<{ id: string }>(
+        `SELECT id FROM videos v WHERE ${vConditions.join(' AND ')}`,
+        vParams
+      )
+      const filteredIds = new Set(filtered.map(f => f.id))
+      videoIds.filter(id => filteredIds.has(id))
     }
-
-    const isShortSelect = tab === 'all' ? 'BOOL_OR(kv.is_short) as is_short' : `${isShortExpr} as is_short`
-
-    const videos = await queryAll(`
-      SELECT 
-        v.id, v.youtube_id, v.title, v.channel_name, v.tags, v.channel_id,
-        v.view_count, v.duration, v.duration_sec, v.thumbnail_url, v.published_at,
-        MIN(kv.rank) as best_rank,
-        COUNT(DISTINCT kv.keyword_id) as keyword_count,
-        MIN(kv.discovered_at) as discovered_at,
-        MAX(kv.last_seen_at) as last_seen_at,
-        STRING_AGG(DISTINCT k.text, ',') as keywords_appeared,
-        ${isShortSelect}
-      FROM videos v
-      INNER JOIN ${fromClause} ON kv.video_id = v.id
-      INNER JOIN keywords k ON k.id = kv.keyword_id
-      WHERE ${whereClause}
-      GROUP BY v.id
-      ORDER BY ${orderBy}
-      LIMIT $${paramIdx++} OFFSET $${paramIdx++}
-    `, [...params, limit, offset])
-
-    const totalResult = await queryOne(`
-      SELECT COUNT(DISTINCT v.id) as cnt
-      FROM videos v
-      INNER JOIN ${fromClause} ON kv.video_id = v.id
-      WHERE ${whereClause}
-    `, params)
-    const total = totalResult?.cnt ?? 0
-
-    const channelsList = campaignId ? await queryAll(`
-      SELECT DISTINCT v.channel_name
-      FROM videos v
-      INNER JOIN ${fromClause} ON kv.video_id = v.id
-      WHERE kv.campaign_id = $1 AND v.channel_name IS NOT NULL AND v.channel_name != ''
-      ORDER BY v.channel_name ASC
-    `, [campaignId]) : []
-
-    const videoIds = videos.map((v: any) => v.id)
 
     let brandMap = new Map<string, string[]>()
-    let keywordRankMap = new Map<string, { keyword_text: string; rank: number }[]>()
-    if (videoIds.length > 0) {
-      const brandRows = await queryAll<{ video_id: string; brand_name: string }>(
-        `SELECT video_id::text, brand_name FROM brand_tags WHERE video_id::text = ANY($1)`,
-        [videoIds]
-      )
-      for (const br of brandRows) {
-        if (!brandMap.has(br.video_id)) brandMap.set(br.video_id, [])
-        brandMap.get(br.video_id)!.push(br.brand_name)
-      }
-
-      let keywordRanksFromClause: string
-      if (tab === 'all') {
-        keywordRanksFromClause = `(
-          SELECT kv.video_id, kv.rank, kv.keyword_id FROM keyword_videos kv
-          UNION ALL
-          SELECT ks.video_id, ks.rank, ks.keyword_id FROM keyword_shorts ks
-        ) krv`
-      } else {
-        keywordRanksFromClause = `${kvTable} krv`
-      }
-
-      const kwRankSql = campaignId
-        ? `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
-           FROM ${keywordRanksFromClause}
-           INNER JOIN keywords k ON k.id = krv.keyword_id
-           WHERE krv.video_id::text = ANY($1) AND krv.campaign_id = $2
-           ORDER BY krv.rank ASC`
-        : `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
-           FROM ${keywordRanksFromClause}
-           INNER JOIN keywords k ON k.id = krv.keyword_id
-           WHERE krv.video_id::text = ANY($1)
-           ORDER BY krv.rank ASC`
-      const kwRankParams = campaignId ? [videoIds, campaignId] : [videoIds]
-
-      const kwRankRows = await queryAll<{ video_id: string; keyword_text: string; rank: number }>(kwRankSql, kwRankParams)
-      for (const kr of kwRankRows) {
-        if (!keywordRankMap.has(kr.video_id)) keywordRankMap.set(kr.video_id, [])
-        keywordRankMap.get(kr.video_id)!.push({ keyword_text: kr.keyword_text, rank: kr.rank })
-      }
+    const brandRows = await queryAll<{ video_id: string; brand_name: string }>(
+      `SELECT video_id::text, brand_name FROM brand_tags WHERE video_id::text = ANY($1)`,
+      [videoIds]
+    )
+    for (const br of brandRows) {
+      if (!brandMap.has(br.video_id)) brandMap.set(br.video_id, [])
+      brandMap.get(br.video_id)!.push(br.brand_name)
     }
 
-    const enriched = videos.map((v: any) => {
+    let enriched = videoIds.map(vid => {
+      const v = videoMap.get(vid)
+      if (!v) return null
+      const stats = videoStatsMap.get(vid)
       let tagsArr: string[] = []
       if (Array.isArray(v.tags)) tagsArr = v.tags
       else try { tagsArr = JSON.parse(v.tags || '[]') } catch {}
-
-      const keywords_appeared = v.keywords_appeared ? v.keywords_appeared.split(',') : []
 
       return {
         id: v.id,
@@ -164,19 +142,37 @@ export async function GET(req: NextRequest) {
         thumbnail_url: v.thumbnail_url || '',
         published_at: v.published_at || '',
         tags: tagsArr,
-        is_short: v.is_short,
-        is_new: v.discovered_at ? new Date(v.discovered_at) > new Date(Date.now() - 7 * 86400000) : false,
-        best_rank: v.best_rank || 0,
-        keyword_count: v.keyword_count || 0,
-        discovered_at: v.discovered_at,
-        last_seen_at: v.last_seen_at,
-        keywords_appeared,
-        keyword_ranks: keywordRankMap.get(v.id) || [],
-        brands: brandMap.get(v.id) || [],
+        is_short: tab === 'short',
+        is_new: stats?.discovered_at ? new Date(stats.discovered_at) > new Date(Date.now() - 7 * 86400000) : false,
+        best_rank: stats?.best_rank || 0,
+        keyword_count: stats?.keyword_count || 0,
+        discovered_at: stats?.discovered_at || '',
+        last_seen_at: stats?.last_seen_at || '',
+        keywords_appeared: (videoKeywordMap.get(vid) || []).map(r => r.keyword_text),
+        keyword_ranks: videoKeywordMap.get(vid) || [],
+        brands: brandMap.get(vid) || [],
       }
-    })
+    }).filter(Boolean) as any[]
 
-    return NextResponse.json({ data: enriched, total, channels: channelsList.map((c: any) => c.channel_name) })
+    if (brandName) {
+      enriched = enriched.filter(v => v.brands.includes(brandName))
+    }
+
+    const sortFn = sort === 'rank'
+      ? (a: any, b: any) => a.best_rank - b.best_rank
+      : sort === 'views'
+        ? (a: any, b: any) => b.view_count - a.view_count
+        : (a: any, b: any) => b.keyword_count - a.keyword_count
+    enriched.sort(sortFn)
+
+    const total = enriched.length
+    const paginated = enriched.slice(offset, offset + limit)
+
+    const channelSet = new Set<string>()
+    enriched.forEach(v => { if (v.channel_name) channelSet.add(v.channel_name) })
+    const channels = Array.from(channelSet).sort()
+
+    return NextResponse.json({ data: paginated, total, channels })
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 })
   }

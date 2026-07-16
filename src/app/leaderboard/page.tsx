@@ -470,9 +470,6 @@ export default function LeaderboardPage() {
                             >
                               {video.title}
                             </Link>
-                            
-                            {/* Detailed per-keyword rank breakdown */}
-                            <KeywordRankBreakdown ranks={video.keyword_ranks} />
                           </div>
                         </div>
                       </td>
