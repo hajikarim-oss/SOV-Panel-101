@@ -14,17 +14,23 @@ try {
 export const redis = redisInstance
 
 export const CACHE_TTL = {
-  overview_kpis: 60,          // 1 min
-  brand_sov: 300,             // 5 min
-  video_leaderboard: 300,     // 5 min
-  sov_trend: 1800,            // 30 min
-  brand_detail: 600,          // 10 min
-  brand_growth: 300,          // 5 min
-  dropped_rankings: 3600,     // 1 hr
-  multi_keyword: 3600,        // 1 hr
-  system_metadata: 30,        // 30 sec
-  keywords_sov: 600,          // 10 min
-  brands_overview: 300,       // 5 min
+  overview_kpis: 43200,        // 12 hr — all KPIs except views
+  brand_sov: 43200,            // 12 hr
+  video_leaderboard: 43200,    // 12 hr
+  sov_trend: 43200,            // 12 hr
+  brand_detail: 43200,         // 12 hr
+  brand_growth: 43200,         // 12 hr
+  dropped_rankings: 43200,     // 12 hr
+  multi_keyword: 43200,        // 12 hr
+  system_metadata: 30,         // 30 sec
+  keywords_sov: 43200,         // 12 hr
+  brands_overview: 43200,      // 12 hr
+  campaigns: 43200,            // 12 hr
+  videos_campaign: 43200,      // 12 hr
+  videos_pending: 43200,       // 12 hr
+  campaign_videos: 43200,      // 12 hr
+  keywords: 43200,             // 12 hr
+  views_snapshot: 60,          // 1 min — views always fresh
 } as const
 
 // ── Stale-While-Revalidate Cache Wrapper ──────────────────────────────────────
@@ -60,8 +66,8 @@ export const cacheKey = {
   overview: (campaignId: string) => `campaign:${campaignId}:overview`,
   brandSov: (campaignId: string) => `campaign:${campaignId}:brands:sov`,
   freqSov: (campaignId: string) => `campaign:${campaignId}:brands:freq-sov`,
-  leaderboard: (campaignId: string, sort: string, page: number) =>
-    `campaign:${campaignId}:videos:leaderboard:${sort}:page:${page}`,
+  leaderboard: (campaignId: string, sort: string, page: number, tab: string) =>
+    `campaign:${campaignId}:videos:leaderboard:${tab}:${sort}:page:${page}`,
   sovTrend: (campaignId: string, brands: string, range: string) =>
     `campaign:${campaignId}:sov-trend:${brands}:${range}`,
   keywordsSov: (campaignId: string, lang: string, type: string) =>
@@ -75,6 +81,14 @@ export const cacheKey = {
     `campaign:${campaignId}:videos:multi-keyword:${minKeywords}`,
   metadata: () => `system:metadata`,
   scrapeJobs: (campaignId: string) => `campaign:${campaignId}:scrape-jobs`,
+  campaigns: () => `campaigns:all`,
+  videosCampaign: (campaignId: string, page: number, sort: string, search: string) =>
+    `campaign:${campaignId}:videos:campaign:${sort}:p${page}:${search || ''}`,
+  videosPending: (campaignId: string, page: number, search: string) =>
+    `campaign:${campaignId}:videos:pending:p${page}:${search || ''}`,
+  keywords: (campaignId: string) => `campaign:${campaignId}:keywords`,
+  brands: (campaignId: string) => `campaign:${campaignId}:brands`,
+  brandsTags: (campaignId: string) => `campaign:${campaignId}:brands:tags`,
 }
 
 // ── Invalidate all keys for a campaign ───────────────────────────────────────

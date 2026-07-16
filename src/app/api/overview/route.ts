@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
 
 export const runtime = 'nodejs'
 
@@ -7,51 +8,38 @@ export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const cid = campaignId || null
+    if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
+    const data = await getCached(cacheKey.overview(cid), () => fetchOverview(cid), CACHE_TTL.overview_kpis)
+    return NextResponse.json(data)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Overview API error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
+}
+
+async function fetchOverview(cid: string) {
     const today = new Date().toISOString().split('T')[0]
     const d1 = new Date(Date.now() - 86400000).toISOString().split('T')[0]
     const d7 = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
     const d30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
 
-    // Parallel batch 1: all independent counts + metadata
     const [kwRes, cvRes, kvRes, ksRes, btRes, cbRes, vsTodayRes, vs1dRes, vs7dRes, vs30dRes, sjRes, cvNewRes] = await Promise.all([
-      cid
-        ? supabase.from('keywords').select('id').eq('campaign_id', cid).eq('status', 'active')
-        : supabase.from('keywords').select('id').eq('status', 'active'),
-      cid
-        ? supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid)
-        : supabase.from('campaign_videos').select('video_id'),
-      cid
-        ? supabase.from('keyword_videos').select('video_id, rank').eq('campaign_id', cid)
-        : supabase.from('keyword_videos').select('video_id, rank'),
-      cid
-        ? supabase.from('keyword_shorts').select('video_id, rank').eq('campaign_id', cid)
-        : supabase.from('keyword_shorts').select('video_id, rank'),
-      cid
-        ? supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', cid)
-        : supabase.from('brand_tags').select('brand_name, video_id'),
-      cid
-        ? supabase.from('campaign_brands').select('name').eq('campaign_id', cid)
-        : supabase.from('campaign_brands').select('name'),
-      cid
-        ? supabase.from('view_snapshots').select('view_count').eq('snapshot_date', today).eq('campaign_id', cid)
-        : supabase.from('view_snapshots').select('view_count').eq('snapshot_date', today),
-      cid
-        ? supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d1).eq('campaign_id', cid)
-        : supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d1),
-      cid
-        ? supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d7).eq('campaign_id', cid)
-        : supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d7),
-      cid
-        ? supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d30).eq('campaign_id', cid)
-        : supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d30),
+      supabase.from('keywords').select('id').eq('campaign_id', cid).eq('status', 'active'),
+      supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid),
+      supabase.from('keyword_videos').select('video_id, rank').eq('campaign_id', cid),
+      supabase.from('keyword_shorts').select('video_id, rank').eq('campaign_id', cid),
+      supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', cid),
+      supabase.from('campaign_brands').select('name').eq('campaign_id', cid),
+      supabase.from('view_snapshots').select('view_count').eq('snapshot_date', today).eq('campaign_id', cid),
+      supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d1).eq('campaign_id', cid),
+      supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d7).eq('campaign_id', cid),
+      supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d30).eq('campaign_id', cid),
       supabase.from('scrape_jobs').select('id').in('status', ['running', 'pending']).limit(100),
-      cid
-        ? supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid).gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString())
-        : supabase.from('campaign_videos').select('video_id').gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString()),
+      supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid).gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString()),
     ])
 
-    // Metadata
     let lastViews: any = null
     let lastRanking: any = null
     try {
@@ -63,27 +51,22 @@ export async function GET(req: NextRequest) {
       lastRanking = lr.data
     } catch {}
 
-    // Counts from array lengths
     const totalKeywords = (kwRes.data || []).length
     const allCvVideoIds = [...new Set((cvRes.data || []).map((r: any) => r.video_id))]
     const totalVideos = allCvVideoIds.length
     const rankedVideos = (kvRes.data || []).length + (ksRes.data || []).length
     const brandTags = (btRes.data || [])
-    const brandNames = [...new Set((cbRes.data || []).map((b: any) => b.name))]
     const newVidsLast7Days = (cvNewRes.data || []).length
 
-    // View sums
     const sumRows = (rows: any[] | null) => (rows || []).reduce((s: number, r: any) => s + (r.view_count || 0), 0)
     const vsToday = sumRows(vsTodayRes.data)
     const vs1d = sumRows(vs1dRes.data)
     const vs7d = sumRows(vs7dRes.data)
     const vs30d = sumRows(vs30dRes.data)
 
-    // Untagged count: videos in campaign_videos that have no brand_tags
     const taggedIds = new Set(brandTags.map((bt: any) => bt.video_id))
     const untaggedVideos = allCvVideoIds.filter(id => !taggedIds.has(id)).length
 
-    // Batch 2: fetch video details for all campaign videos
     let videoRows: any[] = []
     const BATCH = 500
     for (let i = 0; i < allCvVideoIds.length; i += BATCH) {
@@ -92,7 +75,6 @@ export async function GET(req: NextRequest) {
       videoRows.push(...(data || []))
     }
 
-    // Aggregate stats
     let totalViewership = 0
     const channelFreq = new Map<string, number>()
     const videoMap = new Map<string, any>()
@@ -103,14 +85,12 @@ export async function GET(req: NextRequest) {
     }
     const uniqueChannels = channelFreq.size
 
-    // Top channel
     let topChannel = null
     let maxFreq = 0
     for (const [ch, freq] of channelFreq) {
       if (freq > maxFreq) { maxFreq = freq; topChannel = ch }
     }
 
-    // Brand stats
     const brandStatsMap = new Map<string, { brand_views: number; video_count: number }>()
     for (const bt of brandTags) {
       if (!brandStatsMap.has(bt.brand_name)) brandStatsMap.set(bt.brand_name, { brand_views: 0, video_count: 0 })
@@ -137,21 +117,19 @@ export async function GET(req: NextRequest) {
       video_count: b.video_count || 0,
     }))
 
-    // Transcripts
     let transcriptCoverage = 0
     try {
       const { count } = await supabase.from('video_transcripts').select('video_id', { count: 'exact', head: true }).eq('fetch_status', 'success')
       transcriptCoverage = totalVideos > 0 ? Math.round(((count || 0) / totalVideos) * 100) : 0
     } catch {}
 
-    // Daily data (parallel)
     const [dailyViews, dailyNewVideos, dailyKeywords] = await Promise.all([
       getDailyData('view_snapshots', 'snapshot_date', 'view_count', cid, 'SUM'),
       getDailyData('campaign_videos', 'first_seen_at', 'video_id', cid, 'COUNT'),
       getDailyData('keywords', 'created_at', 'id', cid, 'COUNT'),
     ])
 
-    return NextResponse.json({
+    return {
       lastUpdatedViews: lastViews,
       lastUpdatedRanking: lastRanking,
       totalKeywords,
@@ -176,12 +154,7 @@ export async function GET(req: NextRequest) {
       dailyViews,
       dailyNewVideos,
       dailyKeywordsAdded: dailyKeywords,
-    })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'Unknown error'
-    console.error('Overview API error:', e)
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
+    }
 }
 
 async function getDailyData(
