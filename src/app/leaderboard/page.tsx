@@ -478,6 +478,28 @@ export default function LeaderboardPage() {
                       </td>
                       <td style={{ minWidth: 200, position: 'relative' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                          {/* Keyword rank tags */}
+                          {video.keyword_ranks && video.keyword_ranks.length > 0 && video.keyword_ranks.map((kr, idx) => (
+                            <span
+                              key={`kw-${idx}`}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 3,
+                                fontSize: 9.5,
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                background: 'rgba(26,115,232,0.06)',
+                                border: '1px solid rgba(26,115,232,0.15)',
+                                color: '#1A73E8',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {kr.keyword_text.length > 16 ? kr.keyword_text.slice(0, 16) + '…' : kr.keyword_text}: <strong>#{kr.rank}</strong>
+                            </span>
+                          ))}
+
+                          {/* Brand/Product tags */}
                           {video.tags && video.tags.map(tag => (
                             <span
                               key={tag}

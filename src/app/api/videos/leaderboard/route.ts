@@ -103,6 +103,7 @@ export async function GET(req: NextRequest) {
     const videoIds = videos.map((v: any) => v.id)
 
     let brandMap = new Map<string, string[]>()
+    let keywordRankMap = new Map<string, { keyword_text: string; rank: number }[]>()
     if (videoIds.length > 0) {
       const brandRows = await queryAll<{ video_id: string; brand_name: string }>(
         `SELECT video_id::text, brand_name FROM brand_tags WHERE video_id::text = ANY($1)`,
@@ -111,6 +112,31 @@ export async function GET(req: NextRequest) {
       for (const br of brandRows) {
         if (!brandMap.has(br.video_id)) brandMap.set(br.video_id, [])
         brandMap.get(br.video_id)!.push(br.brand_name)
+      }
+
+      const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
+      let keywordRanksFromClause: string
+      if (tab === 'all') {
+        keywordRanksFromClause = `(
+          SELECT kv.video_id, kv.rank, kv.keyword_id FROM keyword_videos kv
+          UNION ALL
+          SELECT ks.video_id, ks.rank, ks.keyword_id FROM keyword_shorts ks
+        ) krv`
+      } else {
+        keywordRanksFromClause = `${kvTable} krv`
+      }
+
+      const kwRankRows = await queryAll<{ video_id: string; keyword_text: string; rank: number }>(
+        `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
+         FROM ${keywordRanksFromClause}
+         INNER JOIN keywords k ON k.id = krv.keyword_id
+         WHERE krv.video_id::text = ANY($1)${campaignId ? ` AND krv.campaign_id = $${paramIdx++}` : ''}
+         ORDER BY krv.rank ASC`,
+        campaignId ? [videoIds, campaignId] : [videoIds]
+      )
+      for (const kr of kwRankRows) {
+        if (!keywordRankMap.has(kr.video_id)) keywordRankMap.set(kr.video_id, [])
+        keywordRankMap.get(kr.video_id)!.push({ keyword_text: kr.keyword_text, rank: kr.rank })
       }
     }
 
@@ -140,6 +166,7 @@ export async function GET(req: NextRequest) {
         discovered_at: v.discovered_at,
         last_seen_at: v.last_seen_at,
         keywords_appeared,
+        keyword_ranks: keywordRankMap.get(v.id) || [],
         brands: brandMap.get(v.id) || [],
       }
     })
