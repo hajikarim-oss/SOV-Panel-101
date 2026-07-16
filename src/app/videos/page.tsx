@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Video, Search, Loader2, ExternalLink, ChevronLeft, ChevronRight, ArrowUpDown, Eye, Tag } from 'lucide-react'
+import { Video, Search, Loader2, ExternalLink, ChevronLeft, ChevronRight, Tag, Eye } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 import Link from 'next/link'
 
@@ -25,7 +25,7 @@ function fmt(n: number): string {
   return n.toLocaleString()
 }
 
-function formatDate(d: string): string {
+function fmtDate(d: string): string {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
@@ -73,118 +73,123 @@ export default function VideosPage() {
   const totalPages = Math.ceil(total / PER_PAGE)
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8FAFC', padding: '24px 32px' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-          <Link href="/" style={{ color: '#64748B', fontSize: 13, textDecoration: 'none' }}>Dashboard</Link>
-          <span style={{ color: '#CBD5E1' }}>/</span>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#0F172A', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Video size={20} color="#8B5CF6" /> All Campaign Videos
-          </h1>
-          <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 600, marginLeft: 8 }}>{total} videos</span>
-        </div>
+    <div className="anim-fade-up">
+      <style>{`@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }`}</style>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: 400 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search videos or channels..."
-              style={{ width: '100%', padding: '8px 12px 8px 32px', borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 13, background: '#fff', outline: 'none' }}
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {(['views', 'date', 'title', 'channel'] as const).map(s => (
-              <button
-                key={s}
-                onClick={() => setSort(s)}
-                style={{
-                  padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E8F0',
-                  background: sort === s ? '#8B5CF6' : '#fff',
-                  color: sort === s ? '#fff' : '#64748B',
-                  fontSize: 11, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                }}
-              >
-                {s === 'views' ? 'Views' : s === 'date' ? 'Date Added' : s === 'title' ? 'Title' : 'Channel'}
-              </button>
-            ))}
+      <div className="page-header">
+        <div>
+          <h1 className="page-title"><span className="accent">All Campaign</span> Videos</h1>
+          <p className="page-subtitle">{total} videos discovered across all keywords. Browse, search, and manage your video pool.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="toggle-group">
+            <button className={`toggle-btn ${sort === 'views' ? 'active' : ''}`} onClick={() => setSort('views')}>Top by Views</button>
+            <button className={`toggle-btn ${sort === 'date' ? 'active' : ''}`} onClick={() => setSort('date')}>Date Added</button>
+            <button className={`toggle-btn ${sort === 'title' ? 'active' : ''}`} onClick={() => setSort('title')}>Title</button>
+            <button className={`toggle-btn ${sort === 'channel' ? 'active' : ''}`} onClick={() => setSort('channel')}>Channel</button>
           </div>
         </div>
+      </div>
 
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 60 }}>
-            <Loader2 size={24} className="animate-spin" style={{ color: '#8B5CF6' }} />
-            <p style={{ color: '#94A3B8', fontSize: 13, marginTop: 12 }}>Loading videos...</p>
-          </div>
-        ) : error ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
-        ) : data.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 60, background: '#fff', borderRadius: 12, border: '1px solid #F1F5F9' }}>
-            <Video size={32} style={{ color: '#CBD5E1', marginBottom: 12 }} />
-            <p style={{ color: '#94A3B8', fontSize: 13 }}>No videos found for this campaign</p>
-          </div>
-        ) : (
-          <>
-            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #F1F5F9', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 360 }}>
+          <Search size={13} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input
+            className="input"
+            style={{ paddingLeft: 34 }}
+            placeholder="Search videos or channels..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', gap: 12 }}>
+          <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
+          <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading videos…</div>
+          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        </div>
+      ) : error ? (
+        <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
+      ) : data.length === 0 ? (
+        <div style={{
+          display: 'flex', gap: 12, padding: 28, borderRadius: 14, background: '#FFFFFF',
+          border: '1px solid #F1F5F9', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'
+        }}>
+          <Video size={32} style={{ color: '#94A3B8', marginBottom: 8 }} />
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1E293B' }}>No Videos Found</div>
+          <div style={{ fontSize: 12, color: '#64748B' }}>Run scrape jobs in Campaign Control to discover videos.</div>
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #F1F5F9' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Video</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Channel</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Eye size={11} /> Views</span>
-                    </th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Tag size={11} /> Brands</span>
-                    </th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#64748B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Added</th>
-                    <th style={{ padding: '10px 14px', width: 40 }}></th>
+                  <tr>
+                    <th>Video</th>
+                    <th>Channel</th>
+                    <th style={{ textAlign: 'right' }}>Views</th>
+                    <th>Brands</th>
+                    <th>Added</th>
+                    <th style={{ width: 40 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.map((v: CampaignVideo) => (
-                    <tr key={v.id} style={{ borderBottom: '1px solid #F8FAFC', transition: 'background 0.15s' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#FAFBFE')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '')}
-                    >
-                      <td style={{ padding: '10px 14px', maxWidth: 400 }}>
+                    <tr key={v.id}>
+                      <td style={{ maxWidth: 380 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {v.thumbnail_url && (
-                            <img src={v.thumbnail_url} alt="" style={{ width: 56, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                          )}
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, color: '#0F172A', fontSize: 12, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Link
+                            href={`/video/${v.youtube_id}`}
+                            style={{ flexShrink: 0, display: 'block', width: 72, height: 40, borderRadius: 6, background: '#F1F5F9', overflow: 'hidden' }}
+                          >
+                            <img
+                              src={`https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg`}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          </Link>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <Link
+                              href={`/video/${v.youtube_id}`}
+                              style={{
+                                fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+                                textDecoration: 'none', lineHeight: 1.4,
+                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                              } as React.CSSProperties}
+                            >
                               {v.title || 'Untitled'}
-                            </div>
+                            </Link>
                             <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{v.duration || '—'}</div>
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#64748B', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ color: 'var(--text-secondary)', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {v.channel_name || '—'}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
-                        {fmt(v.view_count)}
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        <span className="mono">{fmt(v.view_count)}</span>
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td>
                         {v.tags && v.tags.length > 0 ? (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                             {v.tags.slice(0, 3).map((t: string) => (
-                              <span key={t} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(139,92,246,0.08)', color: '#8B5CF6', fontWeight: 600, border: '1px solid rgba(139,92,246,0.15)' }}>{t}</span>
+                              <span key={t} className="badge badge-purple">{t}</span>
                             ))}
                             {v.tags.length > 3 && <span style={{ fontSize: 10, color: '#94A3B8' }}>+{v.tags.length - 3}</span>}
                           </div>
                         ) : (
-                          <span style={{ fontSize: 10, color: '#F59E0B', fontWeight: 600, background: 'rgba(245,158,11,0.08)', padding: '2px 6px', borderRadius: 4, border: '1px solid rgba(245,158,11,0.15)' }}>Untagged</span>
+                          <span className="badge badge-orange">Untagged</span>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#94A3B8', fontSize: 11 }}>
-                        {formatDate(v.first_seen_at)}
+                      <td style={{ color: 'var(--text-muted)', fontSize: 12, whiteSpace: 'nowrap' }}>
+                        {fmtDate(v.first_seen_at)}
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
+                      <td>
                         <a href={`https://youtube.com/watch?v=${v.youtube_id}`} target="_blank" rel="noopener noreferrer"
-                          style={{ color: '#94A3B8', display: 'inline-flex' }}>
+                          style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
                           <ExternalLink size={13} />
                         </a>
                       </td>
@@ -193,31 +198,31 @@ export default function VideosPage() {
                 </tbody>
               </table>
             </div>
+          </div>
 
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 20 }}>
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#fff', cursor: page <= 1 ? 'default' : 'pointer', opacity: page <= 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#64748B' }}
-                >
-                  <ChevronLeft size={14} /> Prev
-                </button>
-                <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#fff', cursor: page >= totalPages ? 'default' : 'pointer', opacity: page >= totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#64748B' }}
-                >
-                  Next <ChevronRight size={14} />
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 20 }}>
+              <button
+                className="page-btn"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="page-btn"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

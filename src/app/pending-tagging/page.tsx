@@ -27,7 +27,7 @@ function fmt(n: number): string {
   return n.toLocaleString()
 }
 
-function formatDate(d: string): string {
+function fmtDate(d: string): string {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
@@ -46,6 +46,7 @@ export default function PendingTaggingPage() {
   const [tagModal, setTagModal] = useState<{ videoId: string; title: string; brands: string[] } | null>(null)
   const [manualTag, setManualTag] = useState('')
   const [tagSaving, setTagSaving] = useState(false)
+  const [campaignBrands, setCampaignBrands] = useState<string[]>([])
 
   const fetchData = useCallback(async () => {
     if (!activeCampaignId) return
@@ -70,8 +71,17 @@ export default function PendingTaggingPage() {
     }
   }, [activeCampaignId, page, search])
 
+  const fetchBrands = useCallback(async (campId: string) => {
+    try {
+      const res = await fetch(`/api/brands?campaign_id=${campId}`)
+      const d = await res.json()
+      if (d.data) setCampaignBrands(d.data.map((b: any) => b.brand_name ?? b.name))
+    } catch (e) { console.error(e) }
+  }, [])
+
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => { if (activeCampaignId) fetchBrands(activeCampaignId) }, [activeCampaignId, fetchBrands])
   useEffect(() => { setPage(1) }, [search])
 
   const totalPages = Math.ceil(total / PER_PAGE)
@@ -95,118 +105,155 @@ export default function PendingTaggingPage() {
     }
   }
 
+  async function handleAiAnalyze(videoId: string) {
+    if (!activeCampaignId) return
+    setAnalyzing(prev => new Set(prev).add(videoId))
+    try {
+      const res = await fetch('/api/brands/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_ids: [videoId], campaign_id: activeCampaignId, force: false }),
+      })
+      const json = await res.json()
+      const analysis = json.results?.[0]
+      if (analysis?.status === 'analyzed' && analysis.high_confidence_brands?.length > 0) {
+        setTagModal(prev => prev ? { ...prev, brands: analysis.high_confidence_brands } : null)
+      } else {
+        setTagModal(prev => prev ? { ...prev, brands: [] } : null)
+      }
+    } catch (err) {
+      console.error('AI analyze error:', err)
+    } finally {
+      setAnalyzing(prev => { const n = new Set(prev); n.delete(videoId); return n })
+    }
+  }
+
   return (
-    <div style={{ minHeight: '100vh', background: '#F8FAFC', padding: '24px 32px' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <Link href="/" style={{ color: '#64748B', fontSize: 13, textDecoration: 'none' }}>Dashboard</Link>
-          <span style={{ color: '#CBD5E1' }}>/</span>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#0F172A', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertCircle size={20} color="#EF4444" /> Pending Tagging
-          </h1>
-          <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 600, marginLeft: 8 }}>{total} videos need brands</span>
-        </div>
-        <p style={{ fontSize: 12, color: '#94A3B8', margin: '0 0 20px 0' }}>
-          Top-ranked videos that haven&apos;t been tagged with a brand yet. Click &quot;Tag&quot; to manually assign a brand, or use AI analysis.
-        </p>
+    <div className="anim-fade-up">
+      <style>{`@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: 400 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#94A3B8' }} />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search untagged videos..."
-              style={{ width: '100%', padding: '8px 12px 8px 32px', borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 13, background: '#fff', outline: 'none' }}
-            />
-          </div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title"><span className="accent" style={{ background: 'var(--red-gradient)', WebkitBackgroundClip: 'text' }}>Pending</span> Tagging</h1>
+          <p className="page-subtitle">Top-ranked videos that haven&apos;t been tagged with a brand yet. Click &quot;Tag&quot; to manually assign, or use AI analysis.</p>
         </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
+            {total} videos need brands
+          </span>
+        </div>
+      </div>
 
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 60 }}>
-            <Loader2 size={24} className="animate-spin" style={{ color: '#8B5CF6' }} />
-            <p style={{ color: '#94A3B8', fontSize: 13, marginTop: 12 }}>Loading untagged videos...</p>
-          </div>
-        ) : error ? (
-          <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
-        ) : data.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 60, background: '#fff', borderRadius: 12, border: '1px solid #F1F5F9' }}>
-            <Check size={32} style={{ color: '#10B981', marginBottom: 12 }} />
-            <p style={{ color: '#0F172A', fontSize: 14, fontWeight: 700, margin: '0 0 4px 0' }}>All caught up!</p>
-            <p style={{ color: '#94A3B8', fontSize: 13 }}>No pending videos need tagging.</p>
-          </div>
-        ) : (
-          <>
-            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #F1F5F9', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 360 }}>
+          <Search size={13} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input
+            className="input"
+            style={{ paddingLeft: 34 }}
+            placeholder="Search untagged videos..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '40vh', gap: 12 }}>
+          <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
+          <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading untagged videos…</div>
+        </div>
+      ) : error ? (
+        <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
+      ) : data.length === 0 ? (
+        <div style={{
+          display: 'flex', gap: 12, padding: 28, borderRadius: 14, background: '#FFFFFF',
+          border: '1px solid #F1F5F9', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'
+        }}>
+          <Check size={32} style={{ color: '#10B981', marginBottom: 8 }} />
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1E293B' }}>All caught up!</div>
+          <div style={{ fontSize: 12, color: '#64748B' }}>No pending videos need tagging.</div>
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ background: '#FEF2F2', borderBottom: '1px solid #FEE2E2' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Video</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Channel</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Views</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Best Rank</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Keywords</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 700, color: '#991B1B', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Action</th>
+                  <tr>
+                    <th>Video</th>
+                    <th>Channel</th>
+                    <th style={{ textAlign: 'right' }}>Views</th>
+                    <th style={{ textAlign: 'center' }}>Best Rank</th>
+                    <th>Keywords</th>
+                    <th style={{ textAlign: 'right' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.map((v: PendingVideo) => (
-                    <tr key={v.id} style={{ borderBottom: '1px solid #F8FAFC', transition: 'background 0.15s' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = '#FFFBFB')}
-                      onMouseLeave={e => (e.currentTarget.style.background = '')}
-                    >
-                      <td style={{ padding: '10px 14px', maxWidth: 350 }}>
+                    <tr key={v.id}>
+                      <td style={{ maxWidth: 350 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {v.thumbnail_url && (
-                            <img src={v.thumbnail_url} alt="" style={{ width: 56, height: 32, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
-                          )}
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ fontWeight: 600, color: '#0F172A', fontSize: 12, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <Link
+                            href={`/video/${v.youtube_id}`}
+                            style={{ flexShrink: 0, display: 'block', width: 72, height: 40, borderRadius: 6, background: '#F1F5F9', overflow: 'hidden' }}
+                          >
+                            <img
+                              src={`https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg`}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          </Link>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <Link
+                              href={`/video/${v.youtube_id}`}
+                              style={{
+                                fontSize: 12, fontWeight: 600, color: 'var(--text-primary)',
+                                textDecoration: 'none', lineHeight: 1.4,
+                                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                              } as React.CSSProperties}
+                            >
                               {v.title || 'Untitled'}
-                            </div>
-                            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>Added {formatDate(v.discovered_at)}</div>
+                            </Link>
+                            <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>Added {fmtDate(v.discovered_at)}</div>
                           </div>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', color: '#64748B', fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ color: 'var(--text-secondary)', fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {v.channel_name || '—'}
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
-                        {fmt(v.view_count)}
+                      <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        <span className="mono">{fmt(v.view_count)}</span>
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 28, height: 28, borderRadius: '50%',
-                          background: v.best_rank <= 3 ? '#FEF2F2' : v.best_rank <= 5 ? '#FFFBEB' : '#F8FAFC',
-                          color: v.best_rank <= 3 ? '#DC2626' : v.best_rank <= 5 ? '#D97706' : '#64748B',
-                          fontWeight: 800, fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
-                          border: `1px solid ${v.best_rank <= 3 ? '#FECACA' : v.best_rank <= 5 ? '#FDE68A' : '#E2E8F0'}`,
+                      <td style={{ textAlign: 'center' }}>
+                        <div className="rank-num" style={{
+                          background: v.best_rank <= 3 ? 'rgba(26,115,232,0.12)' : v.best_rank <= 5 ? 'rgba(255,109,0,0.10)' : 'transparent',
+                          color: v.best_rank <= 3 ? '#1A73E8' : v.best_rank <= 5 ? 'var(--orange)' : 'var(--text-muted)',
                         }}>
                           {v.best_rank}
-                        </span>
+                        </div>
                       </td>
-                      <td style={{ padding: '10px 14px' }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                      <td style={{ minWidth: 180 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                           {v.keyword_names.slice(0, 2).map((kw: string) => (
-                            <span key={kw} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: 'rgba(26,115,232,0.06)', border: '1px solid rgba(26,115,232,0.15)', color: '#1A73E8', fontWeight: 600 }}>{kw}</span>
+                            <span key={kw} className="chip">{kw}</span>
                           ))}
                           {v.keyword_count > 2 && (
-                            <span style={{ fontSize: 10, color: '#94A3B8', padding: '2px 4px' }}>+{v.keyword_count - 2}</span>
+                            <span className="badge badge-gray">+{v.keyword_count - 2}</span>
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                      <td style={{ textAlign: 'right' }}>
                         <button
+                          className="btn btn-sm"
                           onClick={() => setTagModal({ videoId: v.id, title: v.title, brands: [] })}
                           style={{
-                            padding: '5px 12px', borderRadius: 6, border: 'none',
-                            background: '#8B5CF6', color: '#fff',
-                            fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            background: 'rgba(124,58,237,0.08)',
+                            border: '1px solid rgba(124,58,237,0.25)',
+                            color: '#7C3AED',
+                            fontWeight: 700,
                           }}
                         >
-                          <Tag size={11} /> Tag
+                          <Tag size={12} /> Tag
                         </button>
                       </td>
                     </tr>
@@ -214,118 +261,118 @@ export default function PendingTaggingPage() {
                 </tbody>
               </table>
             </div>
+          </div>
 
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 20 }}>
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#fff', cursor: page <= 1 ? 'default' : 'pointer', opacity: page <= 1 ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#64748B' }}
-                >
-                  <ChevronLeft size={14} /> Prev
-                </button>
-                <span style={{ fontSize: 12, color: '#64748B', fontWeight: 600 }}>
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page >= totalPages}
-                  style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#fff', cursor: page >= totalPages ? 'default' : 'pointer', opacity: page >= totalPages ? 0.4 : 1, display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#64748B' }}
-                >
-                  Next <ChevronRight size={14} />
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 12, marginTop: 20 }}>
+              <button
+                className="page-btn"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="page-btn"
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          )}
+        </>
+      )}
 
       {tagModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 1000,
-        }} onClick={() => setTagModal(null)}>
-          <div style={{
-            background: '#fff', borderRadius: 16, padding: 24, width: 440, maxWidth: '90vw',
-            boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
-          }} onClick={e => e.stopPropagation()}>
+        }} onClick={() => { setTagModal(null); setManualTag('') }}>
+          <div className="card" style={{ width: 480, maxWidth: '90vw', padding: 28 }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ fontSize: 16, fontWeight: 800, color: '#0F172A', margin: 0 }}>Tag Video</h3>
-              <button onClick={() => setTagModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94A3B8', fontSize: 18 }}>×</button>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-bright)' }}>Tag Video</h3>
+              <button onClick={() => { setTagModal(null); setManualTag('') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 18, padding: 4 }}>×</button>
             </div>
-            <p style={{ fontSize: 12, color: '#64748B', margin: '0 0 16px 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 16px 0', lineHeight: 1.5 }}>
               {tagModal.title}
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
+                className="input"
                 value={manualTag}
                 onChange={e => setManualTag(e.target.value)}
                 placeholder="Enter brand name..."
                 onKeyDown={e => { if (e.key === 'Enter') handleSaveTag(tagModal.videoId) }}
-                style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 13, outline: 'none' }}
+                style={{ flex: 1 }}
               />
               <button
+                className="btn btn-blue btn-sm"
                 onClick={() => handleSaveTag(tagModal.videoId)}
                 disabled={tagSaving || !manualTag.trim()}
-                style={{
-                  padding: '8px 16px', borderRadius: 8, border: 'none',
-                  background: manualTag.trim() ? '#8B5CF6' : '#E2E8F0',
-                  color: manualTag.trim() ? '#fff' : '#94A3B8',
-                  fontSize: 12, fontWeight: 700, cursor: manualTag.trim() ? 'pointer' : 'default',
-                }}
+                style={{ opacity: manualTag.trim() ? 1 : 0.5 }}
               >
                 {tagSaving ? 'Saving...' : 'Save'}
               </button>
             </div>
+
             <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
               <button
-                onClick={async () => {
-                  if (!activeCampaignId) return
-                  setAnalyzing(prev => new Set(prev).add(tagModal.videoId))
-                  try {
-                    const res = await fetch('/api/brands/analyze', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ video_id: tagModal.videoId, campaign_id: activeCampaignId }),
-                    })
-                    const json = await res.json()
-                    if (json.brands) {
-                      setTagModal(prev => prev ? { ...prev, brands: json.brands } : null)
-                    }
-                  } catch (err) {
-                    console.error('AI analyze error:', err)
-                  } finally {
-                    setAnalyzing(prev => { const n = new Set(prev); n.delete(tagModal.videoId); return n })
-                  }
-                }}
+                className="btn btn-sm"
+                onClick={() => handleAiAnalyze(tagModal.videoId)}
                 disabled={analyzing.has(tagModal.videoId)}
                 style={{
-                  padding: '6px 12px', borderRadius: 6, border: '1px solid #E2E8F0',
-                  background: '#fff', color: '#8B5CF6',
-                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 4,
+                  background: 'rgba(124,58,237,0.08)',
+                  border: '1px solid rgba(124,58,237,0.25)',
+                  color: '#7C3AED',
+                  fontWeight: 700,
                 }}
               >
-                <Brain size={12} /> {analyzing.has(tagModal.videoId) ? 'Analyzing...' : 'AI Analyze'}
+                {analyzing.has(tagModal.videoId)
+                  ? <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Analyzing…</>
+                  : <><Brain size={12} /> AI Analyze</>
+                }
               </button>
             </div>
+
             {tagModal.brands.length > 0 && (
               <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {tagModal.brands.map(b => (
-                  <button key={b} onClick={() => setManualTag(b)} style={{
-                    padding: '4px 10px', borderRadius: 6, border: '1px solid #E2E8F0',
-                    background: manualTag === b ? '#8B5CF6' : '#fff',
-                    color: manualTag === b ? '#fff' : '#64748B',
-                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                  }}>{b}</button>
+                  <button key={b} className={`chip ${manualTag === b ? 'badge badge-purple' : ''}`}
+                    onClick={() => setManualTag(b)} style={{ cursor: 'pointer' }}>
+                    {b}
+                  </button>
                 ))}
               </div>
             )}
-            <a href={`https://youtube.com/watch?v=${tagModal?.videoId}`} target="_blank" rel="noopener noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 12, fontSize: 11, color: '#94A3B8', textDecoration: 'none' }}>
-              <ExternalLink size={11} /> Watch on YouTube
-            </a>
+
+            {campaignBrands.length > 0 && !tagModal.brands.length && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Quick select from campaign brands
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {campaignBrands.slice(0, 8).map(b => (
+                    <button key={b} className={`chip`} onClick={() => setManualTag(b)}
+                      style={{ cursor: 'pointer', background: manualTag === b ? 'var(--blue-dim)' : undefined, color: manualTag === b ? 'var(--blue)' : undefined, border: manualTag === b ? '1px solid rgba(26,115,232,0.25)' : undefined }}>
+                      {b}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(26,115,232,0.08)' }}>
+              <a href={`https://youtube.com/watch?v=${tagModal?.videoId}`} target="_blank" rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', textDecoration: 'none' }}>
+                <ExternalLink size={11} /> Watch on YouTube
+              </a>
+            </div>
           </div>
         </div>
       )}
