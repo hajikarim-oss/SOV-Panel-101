@@ -415,6 +415,7 @@ export default function LeaderboardPage() {
                     Row
                   </th>
                   <th>Video</th>
+                  <th>Keywords Tagged</th>
                   <th>Tags / Products</th>
                   <th>Channel</th>
                   <th style={{ textAlign: 'right' }}>Views</th>
@@ -473,10 +474,9 @@ export default function LeaderboardPage() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ minWidth: 200, position: 'relative' }}>
+                      <td style={{ minWidth: 180 }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                          {/* Keyword rank tags */}
-                          {video.keyword_ranks && video.keyword_ranks.length > 0 && video.keyword_ranks.map((kr, idx) => (
+                          {video.keyword_ranks && video.keyword_ranks.length > 0 ? video.keyword_ranks.map((kr, idx) => (
                             <span
                               key={`kw-${idx}`}
                               style={{
@@ -492,11 +492,15 @@ export default function LeaderboardPage() {
                                 fontWeight: 600,
                               }}
                             >
-                              {kr.keyword_text.length > 16 ? kr.keyword_text.slice(0, 16) + '…' : kr.keyword_text}: <strong>#{kr.rank}</strong>
+                              {kr.keyword_text.length > 18 ? kr.keyword_text.slice(0, 18) + '…' : kr.keyword_text}: <strong>#{kr.rank}</strong>
                             </span>
-                          ))}
-
-                          {/* Brand/Product tags */}
+                          )) : (
+                            <span style={{ fontSize: 11, color: '#CBD5E1' }}>—</span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ minWidth: 200, position: 'relative' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
                           {video.tags && video.tags.map(tag => (
                             <span
                               key={tag}
