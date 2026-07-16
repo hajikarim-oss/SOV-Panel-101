@@ -1,122 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+
+export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
+    if (!campaignId) return NextResponse.json({ data: [], has_scrape_data: false })
 
-    if (campaignId) {
-      let cbQuery = supabase.from('campaign_brands').select('id, name, type, created_at').eq('campaign_id', campaignId).order('created_at', { ascending: true })
-      const { data: brandList } = await cbQuery
-
-      if (!brandList || brandList.length === 0) {
-        const { data: btRows } = await supabase.from('brand_tags').select('brand_name').eq('campaign_id', campaignId)
-        const btBrands = [...new Set((btRows || []).map((bt: any) => bt.brand_name))].sort()
-        if (btBrands.length === 0) {
-          return NextResponse.json({ data: [], has_scrape_data: false })
-        }
-        const enriched = await Promise.all(btBrands.map(async (bName: string) => {
-          const { count } = await supabase.from('brand_tags').select('id', { count: 'exact', head: true }).eq('brand_name', bName).eq('campaign_id', campaignId)
-          const { data: viewRows } = await supabase.from('brand_tags').select('video_id').eq('brand_name', bName).eq('campaign_id', campaignId)
-          const videoIds = (viewRows || []).map((r: any) => r.video_id)
-          let totalViews = 0
-          const BATCH = 500
-          for (let i = 0; i < videoIds.length; i += BATCH) {
-            const batch = videoIds.slice(i, i + BATCH)
-            const { data } = await supabase.from('videos').select('view_count').in('id', batch)
-            totalViews += (data || []).reduce((sum: number, v: any) => sum + (v.view_count || 0), 0)
-          }
-          return { name: bName, type: 'derived', video_count: count || 0, total_views: totalViews, total_mentions: count || 0, product_mentions: 0, created_at: new Date().toISOString() }
-        }))
-        return NextResponse.json({ data: enriched, has_scrape_data: true })
-      }
-
-      const enriched = await Promise.all(brandList.map(async (b: any) => {
-        const [videoRes, viewRes, freqRes] = await Promise.all([
-          supabase.from('brand_tags').select('video_id', { count: 'exact', head: true }).eq('brand_name', b.name).eq('campaign_id', campaignId),
-          supabase.from('brand_tags').select('video_id').eq('brand_name', b.name).eq('campaign_id', campaignId),
-          supabase.from('keyword_videos').select('keyword_id').eq('campaign_id', campaignId),
-        ])
-
-        const videoIds = (viewRes.data || []).map((r: any) => r.video_id)
-        let totalViews = 0
-        if (videoIds.length > 0) {
-          const BATCH = 500
-          for (let i = 0; i < videoIds.length; i += BATCH) {
-            const batch = videoIds.slice(i, i + BATCH)
-            const { data } = await supabase.from('videos').select('view_count').in('id', batch)
-            totalViews += (data || []).reduce((sum: number, v: any) => sum + (v.view_count || 0), 0)
-          }
-        }
-
-        const kvVideoIds = new Set((freqRes.data || []).map((r: any) => r.video_id))
-        const totalFrequency = videoIds.filter((vid: string) => kvVideoIds.has(vid)).length
-
-        return {
-          ...b,
-          video_count: videoRes.count || 0,
-          total_views: totalViews,
-          total_frequency: totalFrequency,
-          sov_percent: 0,
-          freq_sov_percent: 0,
-          has_data: (videoRes.count || 0) > 0,
-        }
-      }))
-
-      const totalViews = enriched.reduce((s, b) => s + (b.total_views || 0), 0) || 1
-      const totalFreq = enriched.reduce((s, b) => s + (b.total_frequency || 0), 0) || 1
-      const hasScrapeData = enriched.some(b => b.has_data)
-      enriched.forEach(b => {
-        if (hasScrapeData) {
-          b.sov_percent = Math.round((b.total_views / totalViews) * 1000) / 10
-          b.freq_sov_percent = Math.round((b.total_frequency / totalFreq) * 1000) / 10
-        }
-      })
-
-      return NextResponse.json({ data: enriched, has_scrape_data: hasScrapeData })
-    }
-
-    // Legacy: no campaign
-    const { data: brandTags } = await supabase.from('brand_tags').select('brand_name, video_id')
-    if (!brandTags || brandTags.length === 0) return NextResponse.json({ data: [] })
-
-    const brandAgg = new Map<string, { views: number; videoIds: Set<string> }>()
-    for (const bt of brandTags as any[]) {
-      if (!brandAgg.has(bt.brand_name)) brandAgg.set(bt.brand_name, { views: 0, videoIds: new Set() })
-      brandAgg.get(bt.brand_name)!.videoIds.add(bt.video_id)
-    }
-
-    const allVids = [...new Set(brandTags.map((bt: any) => bt.video_id))]
-    const videoViews = new Map<string, number>()
-    const BATCH = 500
-    for (let i = 0; i < allVids.length; i += BATCH) {
-      const batch = allVids.slice(i, i + BATCH)
-      const { data } = await supabase.from('videos').select('id, view_count').in('id', batch)
-      for (const v of (data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
-    }
-    for (const [brand, agg] of brandAgg) {
-      for (const vid of agg.videoIds) agg.views += videoViews.get(vid) || 0
-    }
-
-    const totalV = Array.from(brandAgg.values()).reduce((s, a) => s + a.views, 0) || 1
-    const result = Array.from(brandAgg.entries())
-      .map(([name, agg]) => ({
-        brand_name: name,
-        brand_total_views: agg.views,
-        brand_total_freq: 0,
-        sov_percent: Math.round((agg.views / totalV) * 1000) / 10,
-        freq_sov_percent: 0,
-        video_count: agg.videoIds.size,
-        has_data: true,
-      }))
-      .sort((a, b) => b.brand_total_views - a.brand_total_views)
-
-    return NextResponse.json({ data: result })
+    const data = await getCached(cacheKey.brands(campaignId), () => fetchBrands(campaignId!), CACHE_TTL.brands_overview)
+    return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
     console.error('Brands API error:', e)
-    return NextResponse.json({ error: msg }, { status: 500 })
+    return NextResponse.json({ error: msg, data: [] }, { status: 500 })
   }
+}
+
+async function fetchBrands(campaignId: string) {
+  // Get brand names from brand_tags (the source of truth)
+  const { data: btRows } = await supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', campaignId)
+
+  if (!btRows || btRows.length === 0) {
+    // Fallback to campaign_brands
+    const { data: cbRows } = await supabase.from('campaign_brands').select('name').eq('campaign_id', campaignId)
+    const cbBrands = [...new Set((cbRows || []).map((b: any) => b.name))].sort()
+    if (cbBrands.length === 0) return { data: [], has_scrape_data: false }
+
+    return {
+      data: cbBrands.map(name => ({
+        name, type: 'registered', video_count: 0, total_views: 0,
+        sov_percent: 0, freq_sov_percent: 0, has_data: false,
+      })),
+      has_scrape_data: false,
+    }
+  }
+
+  // Build brand → video aggregation
+  const brandAgg = new Map<string, { videoIds: Set<string>; views: number }>()
+  for (const bt of btRows) {
+    if (!brandAgg.has(bt.brand_name)) brandAgg.set(bt.brand_name, { videoIds: new Set(), views: 0 })
+    brandAgg.get(bt.brand_name)!.videoIds.add(bt.video_id)
+  }
+
+  // Fetch all video views in batch
+  const allVideoIds = [...new Set(btRows.map((bt: any) => bt.video_id))]
+  const videoViews = new Map<string, number>()
+  const BATCH = 500
+  for (let i = 0; i < allVideoIds.length; i += BATCH) {
+    const batch = allVideoIds.slice(i, i + BATCH)
+    const { data } = await supabase.from('videos').select('id, view_count').in('id', batch)
+    for (const v of (data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
+  }
+
+  // Sum views per brand
+  for (const [, agg] of brandAgg) {
+    for (const vid of agg.videoIds) agg.views += videoViews.get(vid) || 0
+  }
+
+  // Get keyword video counts for frequency SOV
+  const { data: kvRows } = await supabase.from('keyword_videos').select('video_id').eq('campaign_id', campaignId)
+  const kvVideoIds = new Set((kvRows || []).map((r: any) => r.video_id))
+
+  // Build enriched brand list
+  const totalViews = Array.from(brandAgg.values()).reduce((s, a) => s + a.views, 0) || 1
+  const brands = Array.from(brandAgg.entries())
+    .map(([name, agg]) => {
+      const freq = [...agg.videoIds].filter(vid => kvVideoIds.has(vid)).length
+      return {
+        name,
+        type: 'tagged',
+        video_count: agg.videoIds.size,
+        total_views: agg.views,
+        total_frequency: freq,
+        sov_percent: 0,
+        freq_sov_percent: 0,
+        has_data: agg.videoIds.size > 0,
+      }
+    })
+    .sort((a, b) => b.total_views - a.total_views)
+
+  const totalFreq = brands.reduce((s, b) => s + (b.total_frequency || 0), 0) || 1
+  for (const b of brands) {
+    b.sov_percent = Math.round((b.total_views / totalViews) * 1000) / 10
+    b.freq_sov_percent = Math.round(((b.total_frequency || 0) / totalFreq) * 1000) / 10
+  }
+
+  return { data: brands, has_scrape_data: true }
 }
 
 export async function POST(req: NextRequest) {
@@ -135,7 +106,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
-    console.error('Brands POST error:', e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
@@ -144,13 +114,12 @@ export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json()
     const { id, campaign_id } = body
-    if (!id || !campaign_id) return NextResponse.json({ error: 'id and campaign_id required' }, { status: 400 })
+    if (!id || !campaign_id) return NextResponse.json({ error: 'id and campaign required' }, { status: 400 })
 
     await supabase.from('campaign_brands').delete().eq('id', id).eq('campaign_id', campaign_id)
     return NextResponse.json({ success: true })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
-    console.error('Brands DELETE error:', e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
