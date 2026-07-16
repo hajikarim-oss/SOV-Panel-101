@@ -7,6 +7,7 @@ import {
   BarChart, Bar, Cell,
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { getClientCache, setClientCache } from '@/lib/cache'
 import { AlertCircle, TrendingUp, TrendingDown, RefreshCw, ChevronUp, ChevronDown, Download } from 'lucide-react'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
@@ -79,6 +80,17 @@ export default function SovTrendPage() {
 
   const fetchTrend = useCallback(async (campId: string, d: string) => {
     if (!campId) return
+    const ck = `trend:${campId}:${d}`
+    const cached = getClientCache<any>(ck)
+    if (cached) {
+      const b: string[] = cached.brands ?? []
+      setBrands(b)
+      setActiveBrands(b)
+      setData(cached.data ?? [])
+      setHasScrapeData(cached.has_scrape_data ?? false)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch(`/api/sov-trend?campaign_id=${campId}&days=${d}`)
@@ -88,6 +100,7 @@ export default function SovTrendPage() {
       setActiveBrands(b)
       setData(json.data ?? [])
       setHasScrapeData(json.has_scrape_data ?? false)
+      setClientCache(ck, json)
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }, [])

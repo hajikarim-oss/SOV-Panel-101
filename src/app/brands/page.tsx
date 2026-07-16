@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { getClientCache, setClientCache } from '@/lib/cache'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import { Loader2, Eye, Hash, TrendingUp, Award, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
@@ -39,12 +40,20 @@ export default function BrandIntelligencePage() {
 
   const fetchData = useCallback(async () => {
     if (!activeCampaignId) return
+    const cached = getClientCache<any>(`brands:${activeCampaignId}`)
+    if (cached) {
+      setBrands(cached.data || [])
+      setHasData(cached.has_scrape_data || false)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch(`/api/brands?campaign_id=${activeCampaignId}`)
       const d = await res.json()
       setBrands(d.data || [])
       setHasData(d.has_scrape_data || false)
+      setClientCache(`brands:${activeCampaignId}`, d)
     } catch (e) {
       console.error(e)
     } finally {

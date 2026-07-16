@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { getClientCache, setClientCache } from '@/lib/cache'
 
 export interface Campaign {
   id: string
@@ -16,15 +17,37 @@ export interface Campaign {
 interface CampaignStore {
   campaigns: Campaign[]
   activeCampaignId: string
+  _campaignsFetched: boolean
   setActiveCampaignId: (id: string) => void
   fetchCampaigns: () => Promise<void>
 }
 
-export const useCampaignStore = create<CampaignStore>((set) => ({
+export const useCampaignStore = create<CampaignStore>((set, get) => ({
   campaigns: [],
   activeCampaignId: '',
-  setActiveCampaignId: (id) => set({ activeCampaignId: id }),
+  _campaignsFetched: false,
+
+  setActiveCampaignId: (id) => {
+    const prev = get().activeCampaignId
+    if (prev !== id) set({ activeCampaignId: id })
+  },
+
   fetchCampaigns: async () => {
+    const state = get()
+    // Already fetched — skip
+    if (state._campaignsFetched && state.campaigns.length > 0) return
+
+    // Try client cache first
+    const cached = getClientCache<Campaign[]>('campaigns')
+    if (cached && cached.length > 0) {
+      set({
+        campaigns: cached,
+        _campaignsFetched: true,
+        activeCampaignId: state.activeCampaignId || cached[0].id,
+      })
+      return
+    }
+
     try {
       const r = await fetch('/api/campaigns')
       if (!r.ok) return
@@ -32,14 +55,14 @@ export const useCampaignStore = create<CampaignStore>((set) => ({
       if (!contentType.includes('application/json')) return
       const d = await r.json()
       const camps: Campaign[] = d.campaigns ?? []
-      set({ campaigns: camps })
-      // Auto-select first campaign if none selected
-      set((state) => {
-        if (camps.length > 0 && !state.activeCampaignId) {
-          return { activeCampaignId: camps[0].id }
-        }
-        return {}
-      })
+
+      setClientCache('campaigns', camps)
+
+      set((prev) => ({
+        campaigns: camps,
+        _campaignsFetched: true,
+        activeCampaignId: prev.activeCampaignId || (camps.length > 0 ? camps[0].id : ''),
+      }))
     } catch (e) {
       console.error('Failed to fetch campaigns in store', e)
     }

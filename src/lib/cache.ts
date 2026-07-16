@@ -1,6 +1,5 @@
 import { Redis } from '@upstash/redis'
 
-// Safe initialization to handle dummy env variables during build phase
 let redisInstance: Redis | null = null
 try {
   const url = process.env.UPSTASH_REDIS_REST_URL
@@ -14,51 +13,93 @@ try {
 export const redis = redisInstance
 
 export const CACHE_TTL = {
-  overview_kpis: 43200,        // 12 hr — all KPIs except views
-  brand_sov: 43200,            // 12 hr
-  video_leaderboard: 43200,    // 12 hr
-  sov_trend: 43200,            // 12 hr
-  brand_detail: 43200,         // 12 hr
-  brand_growth: 43200,         // 12 hr
-  dropped_rankings: 43200,     // 12 hr
-  multi_keyword: 43200,        // 12 hr
-  system_metadata: 30,         // 30 sec
-  keywords_sov: 43200,         // 12 hr
-  brands_overview: 43200,      // 12 hr
-  campaigns: 43200,            // 12 hr
-  videos_campaign: 43200,      // 12 hr
-  videos_pending: 43200,       // 12 hr
-  campaign_videos: 43200,      // 12 hr
-  keywords: 43200,             // 12 hr
-  views_snapshot: 60,          // 1 min — views always fresh
+  overview_kpis: 43200,
+  brand_sov: 43200,
+  video_leaderboard: 43200,
+  sov_trend: 43200,
+  brand_detail: 43200,
+  brand_growth: 43200,
+  dropped_rankings: 43200,
+  multi_keyword: 43200,
+  system_metadata: 30,
+  keywords_sov: 43200,
+  brands_overview: 43200,
+  campaigns: 43200,
+  videos_campaign: 43200,
+  videos_pending: 43200,
+  campaign_videos: 43200,
+  keywords: 43200,
+  views_snapshot: 60,
 } as const
 
-// ── Stale-While-Revalidate Cache Wrapper ──────────────────────────────────────
+// ── In-flight Deduplication ───────────────────────────────────────────────────
+const inflight = new Map<string, Promise<unknown>>()
+
+async function dedupedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  if (inflight.has(key)) return inflight.get(key) as Promise<T>
+  const p = fetcher().finally(() => inflight.delete(key))
+  inflight.set(key, p)
+  return p
+}
+
+// ── Cache Wrapper (stale-while-revalidate + deduplication) ────────────────────
 export async function getCached<T>(
   key: string,
   fetcher: () => Promise<T>,
   ttl: number
 ): Promise<T> {
+  return dedupedFetch(key, async () => {
+    // 1. Try Redis
+    try {
+      if (redis) {
+        const cached = await redis.get<T>(key)
+        if (cached !== null) return cached
+      }
+    } catch {}
+
+    // 2. Cache miss — fetch fresh data
+    const fresh = await fetcher()
+
+    // 3. Write to Redis (fire-and-forget)
+    try {
+      if (redis) {
+        redis.setex(key, ttl, JSON.stringify(fresh)).catch(() => {})
+      }
+    } catch {}
+
+    return fresh
+  })
+}
+
+// ── Client-side cache (localStorage) ──────────────────────────────────────────
+const CLIENT_CACHE_PREFIX = 'sov_cache:'
+const CLIENT_CACHE_TTL = 5 * 60 * 1000 // 5 min client-side
+
+export function getClientCache<T>(key: string): T | null {
   try {
-    if (redis) {
-      const cached = await redis.get<T>(key)
-      if (cached !== null) return cached
+    const raw = localStorage.getItem(CLIENT_CACHE_PREFIX + key)
+    if (!raw) return null
+    const { data, ts } = JSON.parse(raw)
+    if (Date.now() - ts > CLIENT_CACHE_TTL) {
+      localStorage.removeItem(CLIENT_CACHE_PREFIX + key)
+      return null
     }
-  } catch {
-    // Redis unavailable → fall through to DB
-  }
+    return data as T
+  } catch { return null }
+}
 
-  const fresh = await fetcher()
-
+export function setClientCache(key: string, data: unknown) {
   try {
-    if (redis) {
-      await redis.setex(key, ttl, JSON.stringify(fresh))
-    }
-  } catch {
-    // Best-effort cache write
-  }
+    localStorage.setItem(CLIENT_CACHE_PREFIX + key, JSON.stringify({ data, ts: Date.now() }))
+  } catch {}
+}
 
-  return fresh
+export function clearClientCache(pattern?: string) {
+  try {
+    const prefix = CLIENT_CACHE_PREFIX + (pattern || '')
+    const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix))
+    keys.forEach(k => localStorage.removeItem(k))
+  } catch {}
 }
 
 // ── Cache Key Builder ─────────────────────────────────────────────────────────
@@ -91,37 +132,13 @@ export const cacheKey = {
   brandsTags: (campaignId: string) => `campaign:${campaignId}:brands:tags`,
 }
 
-// ── Invalidate all keys for a campaign ───────────────────────────────────────
 export async function invalidateCampaign(campaignId: string) {
   try {
     if (redis) {
       const keys = await redis.keys(`campaign:${campaignId}:*`)
-      if (keys.length > 0) {
-        await redis.del(...keys)
-      }
-      // Also clear metadata
+      if (keys.length > 0) await redis.del(...keys)
       await redis.del(cacheKey.metadata())
     }
-  } catch {
-    // Best-effort invalidation
-  }
-}
-
-// ── In-flight Request Deduplication (prevents thundering herd) ───────────────
-const inflightRequests = new Map<string, Promise<unknown>>()
-
-export async function deduplicatedFetch<T>(
-  key: string,
-  fetcher: () => Promise<T>
-): Promise<T> {
-  if (inflightRequests.has(key)) {
-    return inflightRequests.get(key) as Promise<T>
-  }
-
-  const promise = fetcher().finally(() => {
-    inflightRequests.delete(key)
-  })
-
-  inflightRequests.set(key, promise)
-  return promise
+  } catch {}
+  clearClientCache(`campaign:${campaignId}`)
 }

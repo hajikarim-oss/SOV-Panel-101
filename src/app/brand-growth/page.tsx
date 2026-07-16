@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { TrendingUp, TrendingDown, Minus, Download, AlertCircle, RefreshCw, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, Legend } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { getClientCache, setClientCache } from '@/lib/cache'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
@@ -51,12 +52,21 @@ export default function BrandGrowthPage() {
 
   const fetchGrowth = useCallback(async (campId: string, m: 'views' | 'frequency', p: string) => {
     if (!campId) return
+    const cacheKey = `growth:${campId}:${m}:${p}`
+    const cached = getClientCache<any>(cacheKey)
+    if (cached) {
+      if (cached.data) setData(cached.data)
+      setHasScrapeData(cached.has_scrape_data ?? false)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch(`/api/brands/growth?campaign_id=${campId}&metric=${m}&period=${p}`)
       const d = await res.json()
       if (d.data) setData(d.data)
       setHasScrapeData(d.has_scrape_data ?? false)
+      setClientCache(cacheKey, d)
     } catch (e) { console.error(e) }
     finally { setLoading(false) }
   }, [])

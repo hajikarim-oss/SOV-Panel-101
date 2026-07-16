@@ -6,6 +6,7 @@ import {
   Legend, PieChart, Pie, Cell
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
+import { getClientCache, setClientCache } from '@/lib/cache'
 import { AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X, Loader2 } from 'lucide-react'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
@@ -83,6 +84,16 @@ export default function KeywordSovPage() {
 
   const fetchSOV = useCallback(async (campId: string, l: string, t: string) => {
     if (!campId) { setLoading(false); return }
+    const ck = `kwsov:${campId}:${l}:${t}`
+    const cached = getClientCache<any>(ck)
+    if (cached) {
+      if (cached.data && cached.data.length > 0) {
+        setData(cached.data)
+        setBrands(cached.brandNames ?? [])
+      } else { setData([]); setBrands([]) }
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await fetch(`/api/keywords/sov?campaign_id=${campId}&language=${l}&type=${t}`)
@@ -90,10 +101,8 @@ export default function KeywordSovPage() {
       if (d.data && d.data.length > 0) {
         setData(d.data)
         setBrands(d.brandNames ?? [])
-      } else {
-        setData([])
-        setBrands([])
-      }
+      } else { setData([]); setBrands([]) }
+      setClientCache(ck, d)
     } catch (e) { console.error(e); setData([]); setBrands([]) }
     finally { setLoading(false) }
   }, [])

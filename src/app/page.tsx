@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import Link from 'next/link'
 import { useCampaignStore } from '@/lib/store'
+import { getClientCache, setClientCache } from '@/lib/cache'
 import { languageRegions } from '@/lib/india-regions'
 import IndiaMap from '@/components/IndiaMap'
 
@@ -363,6 +364,16 @@ export default function OverviewPage() {
 
   const fetchAll = useCallback(async (campId: string) => {
     if (!campId) return
+    // Check client cache first
+    const cached = getClientCache<any>(`overview:${campId}`)
+    if (cached) {
+      setOverview(cached.overview)
+      setKeywords(cached.keywords)
+      setVideos(cached.videos)
+      setHasData(!cached.overview.error && cached.overview.totalVideos > 0)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const [ovRes, kwRes, vidRes] = await Promise.all([
@@ -375,6 +386,7 @@ export default function OverviewPage() {
       setKeywords(kwData.keywords ?? [])
       setVideos(vidData.data ?? [])
       setHasData(!ovData.error && ovData.totalVideos > 0)
+      setClientCache(`overview:${campId}`, { overview: ovData, keywords: kwData.keywords ?? [], videos: vidData.data ?? [] })
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
