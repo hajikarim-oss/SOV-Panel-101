@@ -90,6 +90,36 @@ export async function GET(req: NextRequest) {
     const transcriptsVal = transcriptsCount?.[0]?.cnt ?? 0
     const transcriptCoverage = totalVidsVal > 0 ? Math.round((transcriptsVal / totalVidsVal) * 100) : 0
 
+    const dailyViewsRows = cid
+      ? await queryAll<any>(
+          `SELECT snapshot_date::text as date, SUM(view_count) as views
+           FROM view_snapshots WHERE campaign_id = $1 AND snapshot_date >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY snapshot_date ORDER BY snapshot_date ASC`, [cid])
+      : await queryAll<any>(
+          `SELECT snapshot_date::text as date, SUM(view_count) as views
+           FROM view_snapshots WHERE snapshot_date >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY snapshot_date ORDER BY snapshot_date ASC`)
+
+    const dailyNewVideos = cid
+      ? await queryAll<any>(
+          `SELECT first_seen_at::date::text as date, COUNT(*) as count
+           FROM campaign_videos WHERE campaign_id = $1 AND first_seen_at >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY first_seen_at::date ORDER BY first_seen_at::date ASC`, [cid])
+      : await queryAll<any>(
+          `SELECT first_seen_at::date::text as date, COUNT(*) as count
+           FROM campaign_videos WHERE first_seen_at >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY first_seen_at::date ORDER BY first_seen_at::date ASC`)
+
+    const dailyKeywordsAdded = cid
+      ? await queryAll<any>(
+          `SELECT created_at::date::text as date, COUNT(*) as count
+           FROM keywords WHERE campaign_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY created_at::date ORDER BY created_at::date ASC`, [cid])
+      : await queryAll<any>(
+          `SELECT created_at::date::text as date, COUNT(*) as count
+           FROM keywords WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+           GROUP BY created_at::date ORDER BY created_at::date ASC`)
+
     return NextResponse.json({
       lastUpdatedViews: lastViews,
       lastUpdatedRanking: lastRanking,
@@ -111,6 +141,9 @@ export async function GET(req: NextRequest) {
       },
       activeScrapingJobs: activeJobs?.[0]?.cnt || 0,
       transcriptCoverage,
+      dailyViews: dailyViewsRows,
+      dailyNewVideos,
+      dailyKeywordsAdded,
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'

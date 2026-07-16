@@ -416,8 +416,30 @@ export default function OverviewPage() {
 
   // ── Derived analytics (all memoised) ──────────────────────────────
   const analytics = useMemo(() => {
-    // 1. Views Trend (respecting local widget filters)
-    const timeline = buildTimeline(overview?.totalViewership ?? 0, ovTrendDays, ovTrendFormat)
+    // 1. Views Trend: use real daily data from DB when available, else generate
+    let timeline: { date: string; views: number; videos: number; keywords: number }[]
+    const realDailyViews = overview?.dailyViews as { date: string; views: number }[] | undefined
+    const realDailyVideos = overview?.dailyNewVideos as { date: string; count: number }[] | undefined
+    const realDailyKw = overview?.dailyKeywordsAdded as { date: string; count: number }[] | undefined
+
+    if (realDailyViews && realDailyViews.length > 1) {
+      const viewsMap = new Map(realDailyViews.map((r: any) => [r.date, r.views]))
+      const videosMap = new Map((realDailyVideos || []).map((r: any) => [r.date, r.count]))
+      const kwMap = new Map((realDailyKw || []).map((r: any) => [r.date, r.count]))
+      const allDates = Array.from(viewsMap.keys()).sort()
+      const filteredDates = allDates.slice(-ovTrendDays)
+      timeline = filteredDates.map(d => {
+        const dateObj = new Date(d + 'T00:00:00')
+        return {
+          date: dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          views: viewsMap.get(d) || 0,
+          videos: videosMap.get(d) || 0,
+          keywords: kwMap.get(d) || 0,
+        }
+      })
+    } else {
+      timeline = buildTimeline(overview?.totalViewership ?? 0, ovTrendDays, ovTrendFormat)
+    }
 
     // 2. Brand SOV & Frequency SOV (respecting local widget filters)
     let filteredBrandVideos = videos
@@ -1052,7 +1074,11 @@ export default function OverviewPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {topViews.slice(0, 4).map((b: any) => (
+                  {topViews.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>
+                      No brand data yet. Tag videos with brands in the Control panel.
+                    </div>
+                  ) : topViews.slice(0, 4).map((b: any) => (
                     <div key={b.name}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                         <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>{b.name}</span>
@@ -1073,7 +1099,11 @@ export default function OverviewPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {channels.slice(0, 4).map((c, i) => (
+                  {channels.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>
+                      No creator data yet. Run a keyword scrape to discover videos.
+                    </div>
+                  ) : channels.slice(0, 4).map((c, i) => (
                     <div key={c.name} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px', borderRadius: 6 }}>
                       <div style={{ width: 22, height: 22, borderRadius: 6, background: `${C[i % C.length]}12`, fontSize: 10, fontWeight: 800, color: C[i % C.length], display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{i + 1}</div>
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -1095,7 +1125,11 @@ export default function OverviewPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {videos.slice(0, 4).map((v: any) => (
+                  {videos.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>
+                      No ranked videos yet. Add keywords and run a scrape in Campaign Control.
+                    </div>
+                  ) : videos.slice(0, 4).map((v: any) => (
                     <a key={v.id} href={`https://youtube.com/watch?v=${v.youtube_id}`} target="_blank" rel="noopener noreferrer"
                       className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 6px', borderRadius: 6, textDecoration: 'none' }}>
                       <img src={v.thumbnail_url || `https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg`} alt="" style={{ width: 40, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />

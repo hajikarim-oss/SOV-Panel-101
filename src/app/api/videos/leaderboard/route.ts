@@ -114,7 +114,6 @@ export async function GET(req: NextRequest) {
         brandMap.get(br.video_id)!.push(br.brand_name)
       }
 
-      const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
       let keywordRanksFromClause: string
       if (tab === 'all') {
         keywordRanksFromClause = `(
@@ -126,14 +125,20 @@ export async function GET(req: NextRequest) {
         keywordRanksFromClause = `${kvTable} krv`
       }
 
-      const kwRankRows = await queryAll<{ video_id: string; keyword_text: string; rank: number }>(
-        `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
-         FROM ${keywordRanksFromClause}
-         INNER JOIN keywords k ON k.id = krv.keyword_id
-         WHERE krv.video_id::text = ANY($1)${campaignId ? ` AND krv.campaign_id = $${paramIdx++}` : ''}
-         ORDER BY krv.rank ASC`,
-        campaignId ? [videoIds, campaignId] : [videoIds]
-      )
+      const kwRankSql = campaignId
+        ? `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
+           FROM ${keywordRanksFromClause}
+           INNER JOIN keywords k ON k.id = krv.keyword_id
+           WHERE krv.video_id::text = ANY($1) AND krv.campaign_id = $2
+           ORDER BY krv.rank ASC`
+        : `SELECT krv.video_id::text, k.text as keyword_text, krv.rank
+           FROM ${keywordRanksFromClause}
+           INNER JOIN keywords k ON k.id = krv.keyword_id
+           WHERE krv.video_id::text = ANY($1)
+           ORDER BY krv.rank ASC`
+      const kwRankParams = campaignId ? [videoIds, campaignId] : [videoIds]
+
+      const kwRankRows = await queryAll<{ video_id: string; keyword_text: string; rank: number }>(kwRankSql, kwRankParams)
       for (const kr of kwRankRows) {
         if (!keywordRankMap.has(kr.video_id)) keywordRankMap.set(kr.video_id, [])
         keywordRankMap.get(kr.video_id)!.push({ keyword_text: kr.keyword_text, rank: kr.rank })
