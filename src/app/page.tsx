@@ -823,13 +823,15 @@ export default function OverviewPage() {
                 color="#1A73E8"
                 info="Total number of active keywords being monitored in this campaign."
               />
-              <MetricCard
-                label="Search Hits"
-                value={fmt(overview?.totalVideos ?? 0)}
-                icon={Video}
-                color="#8B5CF6"
-                info="Total keyword–video matches. One video ranking for 5 keywords counts as 5 hits."
-              />
+              <Link href="/leaderboard" style={{ textDecoration: 'none' }}>
+                <MetricCard
+                  label="Total Videos"
+                  value={fmt(overview?.totalVideos ?? 0)}
+                  icon={Video}
+                  color="#8B5CF6"
+                  info="Total keyword–video matches across all keywords. Click to view all."
+                />
+              </Link>
               <MetricCard
                 label="Unique Videos"
                 value={fmt(overview?.uniqueVideos ?? 0)}
