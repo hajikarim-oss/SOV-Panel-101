@@ -55,19 +55,21 @@ async function fetchLeaderboard(campaignId: string, filters: { brandName: string
     ])
 
     const keywordTextMap = new Map((keywordRows || []).map((k: any) => [k.id, k.text]))
-    const videoKeywordMap = new Map<string, { keyword_text: string; rank: number }[]>()
+    const videoKeywordMap = new Map<string, { keyword_text: string; rank: number; discovered_at: string; last_seen_at: string }[]>()
+    const videoRankedAll = new Map<string, typeof rankedVideos>()
     for (const r of rankedVideos) {
       const kwText = keywordTextMap.get(r.keyword_id) || r.keyword_id
       if (!videoKeywordMap.has(r.video_id)) videoKeywordMap.set(r.video_id, [])
-      videoKeywordMap.get(r.video_id)!.push({ keyword_text: kwText, rank: r.rank })
+      videoKeywordMap.get(r.video_id)!.push({ keyword_text: kwText, rank: r.rank, discovered_at: r.discovered_at, last_seen_at: r.last_seen_at })
+      if (!videoRankedAll.has(r.video_id)) videoRankedAll.set(r.video_id, [])
+      videoRankedAll.get(r.video_id)!.push(r)
     }
 
     const videoStatsMap = new Map<string, { best_rank: number; keyword_count: number; discovered_at: string; last_seen_at: string }>()
     for (const [vid, ranks] of videoKeywordMap) {
       const bestRank = Math.min(...ranks.map(r => r.rank))
-      const videoRanks = rankedVideos.filter(r => r.video_id === vid)
-      const discovered = videoRanks.reduce((min, r) => !min || r.discovered_at < min ? r.discovered_at : min, '')
-      const lastSeen = videoRanks.reduce((max, r) => !max || r.last_seen_at > max ? r.last_seen_at : max, '')
+      const discovered = ranks.reduce((min, r) => !min || r.discovered_at < min ? r.discovered_at : min, '')
+      const lastSeen = ranks.reduce((max, r) => !max || r.last_seen_at > max ? r.last_seen_at : max, '')
       videoStatsMap.set(vid, { best_rank: bestRank, keyword_count: ranks.length, discovered_at: discovered, last_seen_at: lastSeen })
     }
 

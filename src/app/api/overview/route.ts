@@ -69,10 +69,15 @@ async function fetchOverview(cid: string) {
 
     let videoRows: any[] = []
     const BATCH = 500
+    const videoBatchPromises = []
     for (let i = 0; i < allCvVideoIds.length; i += BATCH) {
-      const batch = allCvVideoIds.slice(i, i + BATCH)
-      const { data } = await supabase.from('videos').select('id, view_count, channel_name, tags').in('id', batch)
-      videoRows.push(...(data || []))
+      videoBatchPromises.push(
+        supabase.from('videos').select('id, view_count, channel_name, tags').in('id', allCvVideoIds.slice(i, i + BATCH))
+      )
+    }
+    const videoBatchResults = await Promise.all(videoBatchPromises)
+    for (const result of videoBatchResults) {
+      videoRows.push(...(result.data || []))
     }
 
     let totalViewership = 0

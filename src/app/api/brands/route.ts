@@ -44,14 +44,19 @@ async function fetchBrands(campaignId: string) {
     brandAgg.get(bt.brand_name)!.videoIds.add(bt.video_id)
   }
 
-  // Fetch all video views in batch
+  // Fetch all video views in parallel batches
   const allVideoIds = [...new Set(btRows.map((bt: any) => bt.video_id))]
   const videoViews = new Map<string, number>()
   const BATCH = 500
+  const videoBatchPromises = []
   for (let i = 0; i < allVideoIds.length; i += BATCH) {
-    const batch = allVideoIds.slice(i, i + BATCH)
-    const { data } = await supabase.from('videos').select('id, view_count').in('id', batch)
-    for (const v of (data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
+    videoBatchPromises.push(
+      supabase.from('videos').select('id, view_count').in('id', allVideoIds.slice(i, i + BATCH))
+    )
+  }
+  const videoBatchResults = await Promise.all(videoBatchPromises)
+  for (const result of videoBatchResults) {
+    for (const v of (result.data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
   }
 
   // Sum views per brand
