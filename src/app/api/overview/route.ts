@@ -124,8 +124,8 @@ async function fetchOverview(cid: string) {
 
     let transcriptCoverage = 0
     try {
-      const { count } = await supabase.from('video_transcripts').select('video_id', { count: 'exact', head: true }).eq('fetch_status', 'success')
-      transcriptCoverage = totalVideos > 0 ? Math.round(((count || 0) / totalVideos) * 100) : 0
+      const { data: transcriptData } = await supabase.from('video_transcripts').select('video_id').eq('fetch_status', 'success')
+      transcriptCoverage = totalVideos > 0 ? Math.round(((transcriptData?.length || 0) / totalVideos) * 100) : 0
     } catch {}
 
     const [dailyViews, dailyNewVideos, dailyKeywords] = await Promise.all([

@@ -26,13 +26,13 @@ async function fetchGrowth(campaignId: string, metric: string, period: string) {
   const periodStart = new Date(Date.now() - periodDays * 86400000).toISOString().split('T')[0]
   const prevStart = new Date(Date.now() - periodDays * 2 * 86400000).toISOString().split('T')[0]
 
-  // Parallel: get brand_tags + check if any exist
-  const [{ data: brandTags }, { count: btCount }] = await Promise.all([
-    supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', campaignId),
-    supabase.from('brand_tags').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
-  ])
+  // Fetch brand_tags directly (count:'exact',head:true returns null on some tables)
+  const { data: brandTags } = await supabase
+    .from('brand_tags')
+    .select('brand_name, video_id')
+    .eq('campaign_id', campaignId)
 
-  if (!btCount || btCount === 0) {
+  if (!brandTags || brandTags.length === 0) {
     // Fallback to campaign_brands
     const { data: registered } = await supabase.from('campaign_brands').select('name as brand_name').eq('campaign_id', campaignId)
     const brands = registered || []

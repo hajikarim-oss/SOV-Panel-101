@@ -17,14 +17,14 @@ export async function GET(req: NextRequest) {
 
     const enriched = await Promise.all((keywords || []).map(async (kw: any) => {
       const [kvRes, ksRes, lastRes] = await Promise.all([
-        supabase.from('keyword_videos').select('id', { count: 'exact', head: true }).eq('keyword_id', kw.id),
-        supabase.from('keyword_shorts').select('id', { count: 'exact', head: true }).eq('keyword_id', kw.id),
+        supabase.from('keyword_videos').select('id').eq('keyword_id', kw.id),
+        supabase.from('keyword_shorts').select('id').eq('keyword_id', kw.id),
         supabase.from('keyword_videos').select('last_seen_at').eq('keyword_id', kw.id).order('last_seen_at', { ascending: false }).limit(1).maybeSingle(),
       ])
       return {
         ...kw,
-        long_form_count: kvRes.count || 0,
-        short_form_count: ksRes.count || 0,
+        long_form_count: kvRes.data?.length || 0,
+        short_form_count: ksRes.data?.length || 0,
         last_scraped: lastRes.data?.last_seen_at || kw.last_scraped_at || null,
       }
     }))

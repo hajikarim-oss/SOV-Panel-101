@@ -53,16 +53,17 @@ async function fetchSovTrend(campaignId: string, days: number) {
   // Parallel: check snapshots exist AND fetch snapshot data
   const startDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0]
 
-  const [{ count: snapCount }, { data: snapshots }] = await Promise.all([
-    supabase.from('view_snapshots').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
-    supabase.from('view_snapshots')
-      .select('video_id, view_count, snapshot_date')
-      .eq('campaign_id', campaignId)
-      .gte('snapshot_date', startDate)
-      .in('video_id', allVideoIds.length > 0 ? allVideoIds : ['__none__']),
-  ])
+  // Fetch snapshot data (count:'exact',head:true returns null — check data length instead)
+  const startDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0]
 
-  const hasSnapshots = (snapCount || 0) > 0
+  const { data: snapshots } = await supabase
+    .from('view_snapshots')
+    .select('video_id, view_count, snapshot_date')
+    .eq('campaign_id', campaignId)
+    .gte('snapshot_date', startDate)
+    .in('video_id', allVideoIds.length > 0 ? allVideoIds : ['__none__'])
+
+  const hasSnapshots = (snapshots || []).length > 0
 
   // Build date → brand → views map in a single pass
   const dateBrandViews = new Map<string, Map<string, number>>()
