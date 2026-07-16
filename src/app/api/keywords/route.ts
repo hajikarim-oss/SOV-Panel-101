@@ -80,6 +80,32 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
+export async function PUT(req: NextRequest) {
+  try {
+    const { id, text, language, category } = await req.json()
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+    const updates: any = {}
+    if (text !== undefined) updates.text = text.trim()
+    if (language !== undefined) updates.language = language
+    if (category !== undefined) updates.category = category
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'No fields to update' }, { status: 400 })
+    }
+
+    const { error } = await supabase.from('keywords').update(updates).eq('id', id)
+    if (error) {
+      console.error('Keywords PUT error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true })
+  } catch (e: any) {
+    console.error('Keywords PUT error:', e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
+  }
+}
+
 export async function PATCH(req: NextRequest) {
   try {
     const { id, status } = await req.json()

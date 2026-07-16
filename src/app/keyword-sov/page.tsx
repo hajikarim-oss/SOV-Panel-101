@@ -6,7 +6,7 @@ import {
   Legend, PieChart, Pie, Cell
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { Loader2, AlertCircle, RefreshCw, Hash, Target, BarChart2, Download } from 'lucide-react'
+import { Loader2, AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X } from 'lucide-react'
 import Link from 'next/link'
 
 const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
@@ -17,12 +17,30 @@ const LANGUAGE_OPTS = [
   { value: 'te', label: 'Telugu' },
   { value: 'ml', label: 'Malayalam' },
   { value: 'en', label: 'English' },
+  { value: 'hi', label: 'Hinglish' },
+  { value: 'kn', label: 'Kannada' },
+]
+
+const EDIT_LANG_OPTS = [
+  { value: 'en', label: 'English' },
+  { value: 'hi', label: 'Hinglish' },
+  { value: 'kn', label: 'Kannada' },
+  { value: 'te', label: 'Telugu' },
+  { value: 'ta', label: 'Tamil' },
+  { value: 'ml', label: 'Malayalam' },
 ]
 
 const TYPE_OPTS = [
   { value: 'all', label: 'All Types' },
   { value: 'generic', label: 'Generic' },
   { value: 'branded', label: 'Branded' },
+  { value: 'comparison', label: 'Comparison' },
+]
+
+const EDIT_TYPE_OPTS = [
+  { value: 'generic', label: 'Generic' },
+  { value: 'branded', label: 'Branded' },
+  { value: 'comparison', label: 'Comparison' },
 ]
 
 function CustomTooltip({ active, payload, label }: any) {
@@ -56,6 +74,11 @@ export default function KeywordSovPage() {
   const [sortDesc, setSortDesc] = useState<boolean>(true)
   const [metrics, setMetrics] = useState<any>({})
   const [campaignOverview, setCampaignOverview] = useState<any>(null)
+  const [editModal, setEditModal] = useState<{ open: boolean; keyword: any }>({ open: false, keyword: null })
+  const [editText, setEditText] = useState('')
+  const [editLang, setEditLang] = useState('en')
+  const [editType, setEditType] = useState('generic')
+  const [editSaving, setEditSaving] = useState(false)
 
   const fetchSOV = useCallback(async (campId: string, l: string, t: string) => {
     if (!campId) { setLoading(false); return }
@@ -91,6 +114,35 @@ export default function KeywordSovPage() {
     }
     fetchOverview()
   }, [activeCampaignId])
+
+  const openEditModal = (kw: any) => {
+    setEditText(kw.keyword || kw.text || '')
+    setEditLang(kw.language || 'en')
+    setEditType(kw.type || kw.category || 'generic')
+    setEditModal({ open: true, keyword: kw })
+  }
+
+  const saveEdit = async () => {
+    if (!editModal.keyword?.id || !editText.trim()) return
+    setEditSaving(true)
+    try {
+      const res = await fetch('/api/keywords', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editModal.keyword.id,
+          text: editText.trim(),
+          language: editLang,
+          category: editType,
+        }),
+      })
+      if (res.ok) {
+        setEditModal({ open: false, keyword: null })
+        if (activeCampaignId) fetchSOV(activeCampaignId, lang, type)
+      }
+    } catch (e) { console.error(e) }
+    finally { setEditSaving(false) }
+  }
 
   const exportCSV = () => {
     if (!data || data.length === 0) return
@@ -391,7 +443,7 @@ export default function KeywordSovPage() {
                 </div>
                 <button onClick={exportCSV} className="btn btn-ghost btn-sm"><Download size={13} /> Export CSV</button>
               </div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 700 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 750 }}>
                 <thead>
                   <tr>
                     <th style={{ textAlign: 'left', padding: '10px 12px', fontSize: 11, color: '#64748B', cursor: 'pointer' }} onClick={() => { setSortKey('keyword'); setSortDesc(prev => sortKey === 'keyword' ? !prev : true) }}>Keyword {sortKey === 'keyword' ? (sortDesc ? '▼' : '▲') : ''}</th>
@@ -400,6 +452,7 @@ export default function KeywordSovPage() {
                       <th key={b} style={{ textAlign: 'right', padding: '10px 12px', fontSize: 11, color: '#64748B', cursor: 'pointer' }} onClick={() => { setSortKey(b); setSortDesc(prev => sortKey === b ? !prev : true) }}>{b.length > 10 ? b.slice(0, 10) + '…' : b} {sortKey === b ? (sortDesc ? '▼' : '▲') : ''}</th>
                     ))}
                     <th style={{ textAlign: 'right', padding: '10px 12px', fontSize: 11, color: '#64748B' }}>Other</th>
+                    <th style={{ textAlign: 'center', padding: '10px 12px', fontSize: 11, color: '#64748B' }}>Edit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -411,6 +464,16 @@ export default function KeywordSovPage() {
                         <td key={b} style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{(Number(kw[b] ?? 0)).toFixed(1)}%</td>
                       ))}
                       <td style={{ padding: '10px 12px', textAlign: 'right', color: '#64748B' }}>{(Number(kw.Other ?? 0)).toFixed(1)}%</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <button
+                          onClick={() => openEditModal(kw)}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, border: '1px solid #E2E8F0', background: '#F8FAFC', color: '#475569', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s', fontFamily: 'inherit' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#EFF6FF'; e.currentTarget.style.borderColor = '#1A73E8'; e.currentTarget.style.color = '#1A73E8' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = '#F8FAFC'; e.currentTarget.style.borderColor = '#E2E8F0'; e.currentTarget.style.color = '#475569' }}
+                        >
+                          <Pencil size={12} /> Edit
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -418,6 +481,113 @@ export default function KeywordSovPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Edit Keyword Modal */}
+      {editModal.open && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setEditModal({ open: false, keyword: null })}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 16, padding: '28px 32px', width: '100%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,0.2)', border: '1px solid #E2E8F0' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A' }}>Edit Keyword Target</div>
+                <div style={{ fontSize: 12.5, color: '#64748B', marginTop: 4 }}>Update keyword text, language, or classification type</div>
+              </div>
+              <button
+                onClick={() => setEditModal({ open: false, keyword: null })}
+                style={{ padding: 6, borderRadius: 8, border: 'none', background: '#F1F5F9', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <X size={16} style={{ color: '#64748B' }} />
+              </button>
+            </div>
+
+            {/* Keyword Text */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Keyword Text</label>
+              <input
+                type="text"
+                value={editText}
+                onChange={e => setEditText(e.target.value)}
+                style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1.5px solid #E2E8F0', fontSize: 13.5, fontWeight: 500, color: '#0F172A', outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.15s' }}
+                onFocus={e => e.currentTarget.style.borderColor = '#1A73E8'}
+                onBlur={e => e.currentTarget.style.borderColor = '#E2E8F0'}
+                placeholder="e.g. best water purifier 2026"
+              />
+            </div>
+
+            {/* Language */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Language</label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {EDIT_LANG_OPTS.map(o => (
+                  <button
+                    key={o.value}
+                    onClick={() => setEditLang(o.value)}
+                    style={{
+                      padding: '7px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                      background: editLang === o.value ? '#0F172A' : '#F8FAFC',
+                      color: editLang === o.value ? '#FFF' : '#475569',
+                      border: `1.5px solid ${editLang === o.value ? '#0F172A' : '#E2E8F0'}`,
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Classification Type */}
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 10.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>Keyword Classification Type</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {EDIT_TYPE_OPTS.map(o => (
+                  <button
+                    key={o.value}
+                    onClick={() => setEditType(o.value)}
+                    style={{
+                      padding: '7px 20px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                      background: editType === o.value ? '#0F172A' : '#F8FAFC',
+                      color: editType === o.value ? '#FFF' : '#475569',
+                      border: `1.5px solid ${editType === o.value ? '#0F172A' : '#E2E8F0'}`,
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={saveEdit}
+                disabled={editSaving || !editText.trim()}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13.5, fontWeight: 700, cursor: editSaving || !editText.trim() ? 'not-allowed' : 'pointer', fontFamily: 'inherit', transition: 'all 0.15s',
+                  background: editSaving || !editText.trim() ? '#CBD5E1' : '#1A73E8',
+                  color: '#FFF', border: 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                {editSaving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : '✓'} {editSaving ? 'Saving…' : 'Save Changes'}
+              </button>
+              <button
+                onClick={() => setEditModal({ open: false, keyword: null })}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  background: '#F1F5F9', color: '#475569', border: '1px solid #E2E8F0',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
