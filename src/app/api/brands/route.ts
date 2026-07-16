@@ -1,45 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll, queryOne } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
 
     if (campaignId) {
-      const list = await queryAll(`
-        SELECT id, name, type, created_at FROM campaign_brands WHERE campaign_id = $1 ORDER BY created_at ASC
-      `, [campaignId])
+      let cbQuery = supabase.from('campaign_brands').select('id, name, type, created_at').eq('campaign_id', campaignId).order('created_at', { ascending: true })
+      const { data: brandList } = await cbQuery
 
-      const enriched = await Promise.all(list.map(async (b: any) => {
-        const videoCountResult = await queryOne(`
-          SELECT COUNT(DISTINCT bt.video_id) as cnt
-          FROM brand_tags bt
-          WHERE bt.brand_name = $1 AND bt.campaign_id = $2
-        `, [b.name, campaignId])
-        const videoCount = videoCountResult?.cnt ?? 0
+      if (!brandList || brandList.length === 0) {
+        return NextResponse.json({ data: [], has_scrape_data: false })
+      }
 
-        const viewResult = await queryOne(`
-          SELECT COALESCE(SUM(v.view_count), 0)::bigint as total_views
-          FROM brand_tags bt
-          INNER JOIN videos v ON v.id = bt.video_id
-          WHERE bt.brand_name = $1 AND bt.campaign_id = $2
-        `, [b.name, campaignId])
+      const enriched = await Promise.all(brandList.map(async (b: any) => {
+        const [videoRes, viewRes, freqRes] = await Promise.all([
+          supabase.from('brand_tags').select('video_id', { count: 'exact', head: true }).eq('brand_name', b.name).eq('campaign_id', campaignId),
+          supabase.from('brand_tags').select('video_id').eq('brand_name', b.name).eq('campaign_id', campaignId),
+          supabase.from('keyword_videos').select('keyword_id').eq('campaign_id', campaignId),
+        ])
 
-        const freqResult = await queryOne(`
-          SELECT COUNT(DISTINCT kv.keyword_id)::int as total_frequency
-          FROM brand_tags bt
-          LEFT JOIN keyword_videos kv ON kv.video_id = bt.video_id
-          WHERE bt.brand_name = $1 AND bt.campaign_id = $2
-        `, [b.name, campaignId])
+        const videoIds = (viewRes.data || []).map((r: any) => r.video_id)
+        let totalViews = 0
+        if (videoIds.length > 0) {
+          const BATCH = 500
+          for (let i = 0; i < videoIds.length; i += BATCH) {
+            const batch = videoIds.slice(i, i + BATCH)
+            const { data } = await supabase.from('videos').select('view_count').in('id', batch)
+            totalViews += (data || []).reduce((sum: number, v: any) => sum + (v.view_count || 0), 0)
+          }
+        }
+
+        const kvVideoIds = new Set((freqRes.data || []).map((r: any) => r.video_id))
+        const totalFrequency = videoIds.filter((vid: string) => kvVideoIds.has(vid)).length
 
         return {
           ...b,
-          video_count: videoCount ?? 0,
-          total_views: Number(viewResult?.total_views ?? 0),
-          total_frequency: freqResult?.total_frequency ?? 0,
+          video_count: videoRes.count || 0,
+          total_views: totalViews,
+          total_frequency: totalFrequency,
           sov_percent: 0,
           freq_sov_percent: 0,
-          has_data: (videoCount ?? 0) > 0,
+          has_data: (videoRes.count || 0) > 0,
         }
       }))
 
@@ -57,29 +59,45 @@ export async function GET(req: NextRequest) {
     }
 
     // Legacy: no campaign
-    const brands = await queryAll(`
-      SELECT bt.brand_name, SUM(v.view_count)::bigint as total_views,
-             COUNT(DISTINCT v.id)::int as video_count
-      FROM brand_tags bt
-      INNER JOIN videos v ON v.id = bt.video_id
-      GROUP BY bt.brand_name
-      ORDER BY total_views DESC
-    `)
+    const { data: brandTags } = await supabase.from('brand_tags').select('brand_name, video_id')
+    if (!brandTags || brandTags.length === 0) return NextResponse.json({ data: [] })
 
-    const totalV = brands.reduce((s: number, b: any) => s + Number(b.total_views || 0), 0) || 1
-    const result = brands.map((b: any) => ({
-      brand_name: b.brand_name,
-      brand_total_views: Number(b.total_views),
-      brand_total_freq: 0,
-      sov_percent: Math.round((Number(b.total_views) / totalV) * 1000) / 10,
-      freq_sov_percent: 0,
-      video_count: b.video_count,
-      has_data: true,
-    }))
+    const brandAgg = new Map<string, { views: number; videoIds: Set<string> }>()
+    for (const bt of brandTags as any[]) {
+      if (!brandAgg.has(bt.brand_name)) brandAgg.set(bt.brand_name, { views: 0, videoIds: new Set() })
+      brandAgg.get(bt.brand_name)!.videoIds.add(bt.video_id)
+    }
+
+    const allVids = [...new Set(brandTags.map((bt: any) => bt.video_id))]
+    const videoViews = new Map<string, number>()
+    const BATCH = 500
+    for (let i = 0; i < allVids.length; i += BATCH) {
+      const batch = allVids.slice(i, i + BATCH)
+      const { data } = await supabase.from('videos').select('id, view_count').in('id', batch)
+      for (const v of (data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
+    }
+    for (const [brand, agg] of brandAgg) {
+      for (const vid of agg.videoIds) agg.views += videoViews.get(vid) || 0
+    }
+
+    const totalV = Array.from(brandAgg.values()).reduce((s, a) => s + a.views, 0) || 1
+    const result = Array.from(brandAgg.entries())
+      .map(([name, agg]) => ({
+        brand_name: name,
+        brand_total_views: agg.views,
+        brand_total_freq: 0,
+        sov_percent: Math.round((agg.views / totalV) * 1000) / 10,
+        freq_sov_percent: 0,
+        video_count: agg.videoIds.size,
+        has_data: true,
+      }))
+      .sort((a, b) => b.brand_total_views - a.brand_total_views)
 
     return NextResponse.json({ data: result })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Brands API error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
 
@@ -89,16 +107,18 @@ export async function POST(req: NextRequest) {
     const { campaign_id, name, type } = body
     if (!campaign_id || !name) return NextResponse.json({ error: 'campaign_id and name required' }, { status: 400 })
 
-    await queryOne(
-      `INSERT INTO campaign_brands (campaign_id, name, type)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (campaign_id, name) DO NOTHING`,
-      [campaign_id, name.trim(), type ?? 'competitor']
-    )
+    await supabase
+      .from('campaign_brands')
+      .upsert(
+        { campaign_id, name: name.trim(), type: type ?? 'competitor' },
+        { onConflict: 'campaign_id,name', ignoreDuplicates: true }
+      )
 
     return NextResponse.json({ success: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Brands POST error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
 
@@ -108,9 +128,11 @@ export async function DELETE(req: NextRequest) {
     const { id, campaign_id } = body
     if (!id || !campaign_id) return NextResponse.json({ error: 'id and campaign_id required' }, { status: 400 })
 
-    await queryOne(`DELETE FROM campaign_brands WHERE id = $1 AND campaign_id = $2`, [id, campaign_id])
+    await supabase.from('campaign_brands').delete().eq('id', id).eq('campaign_id', campaign_id)
     return NextResponse.json({ success: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Brands DELETE error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

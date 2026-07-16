@@ -1,78 +1,107 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll, queryOne } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
-    const metric = req.nextUrl.searchParams.get('metric') ?? 'views'
     const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')
 
-    // Get brand names
-    const brandCond = campaignId ? 'WHERE cb.campaign_id = $1' : ''
-    const bParams: any[] = campaignId ? [campaignId] : []
-    const brands = await queryAll(`
-      SELECT DISTINCT cb.name as brand_name
-      FROM campaign_brands cb
-      ${brandCond}
-      ORDER BY cb.name
-    `, bParams)
+    // 1. Get brand names
+    let brandQuery = supabase.from('campaign_brands').select('name')
+    if (campaignId) brandQuery = brandQuery.eq('campaign_id', campaignId)
+    const { data: brandRows } = await brandQuery
 
-    // Build date range
+    if (!brandRows || brandRows.length === 0) {
+      return NextResponse.json({ data: [], brands: [], has_scrape_data: false })
+    }
+
+    const brandNames = [...new Set(brandRows.map((b: any) => b.name))].sort()
+
+    // 2. Get all video_ids tagged with these brands
+    let btQuery = supabase.from('brand_tags').select('video_id, brand_name')
+    if (campaignId) btQuery = btQuery.eq('campaign_id', campaignId)
+    const { data: brandTags } = await btQuery
+
+    if (!brandTags || brandTags.length === 0) {
+      return NextResponse.json({ data: [], brands: brandNames, has_scrape_data: false })
+    }
+
+    const brandVideoMap = new Map<string, string[]>()
+    const videoBrandMap = new Map<string, string[]>()
+    for (const bt of brandTags as any[]) {
+      if (!brandVideoMap.has(bt.brand_name)) brandVideoMap.set(bt.brand_name, [])
+      brandVideoMap.get(bt.brand_name)!.push(bt.video_id)
+      if (!videoBrandMap.has(bt.video_id)) videoBrandMap.set(bt.video_id, [])
+      videoBrandMap.get(bt.video_id)!.push(bt.brand_name)
+    }
+
+    const allVideoIds = [...new Set(brandTags.map((bt: any) => bt.video_id))]
+
+    // 3. Check if snapshots exist
+    let snapCountQuery = supabase.from('view_snapshots').select('id', { count: 'exact', head: true })
+    if (campaignId) snapCountQuery = snapCountQuery.eq('campaign_id', campaignId)
+    const { count: snapCount } = await snapCountQuery
+    const hasSnapshots = (snapCount || 0) > 0
+
+    // 4. Fetch all snapshots in bulk for the date range
+    const startDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0]
+
+    let snapQuery = supabase.from('view_snapshots').select('video_id, view_count, snapshot_date')
+    if (campaignId) snapQuery = snapQuery.eq('campaign_id', campaignId)
+    snapQuery = snapQuery.gte('snapshot_date', startDate).in('video_id', allVideoIds.length > 0 ? allVideoIds : ['__none__'])
+
+    const { data: snapshots } = await snapQuery
+
+    // 5. Build a map: date -> brand -> total views
+    const dateBrandViews = new Map<string, Map<string, number>>()
+
+    for (const snap of (snapshots || []) as any[]) {
+      const dateStr = typeof snap.snapshot_date === 'string' ? snap.snapshot_date.split('T')[0] : String(snap.snapshot_date)
+      if (!dateBrandViews.has(dateStr)) dateBrandViews.set(dateStr, new Map())
+
+      const brandNamesForVideo = videoBrandMap.get(snap.video_id)
+      if (brandNamesForVideo) {
+        const brandMap = dateBrandViews.get(dateStr)!
+        for (const brandName of brandNamesForVideo) {
+          brandMap.set(brandName, (brandMap.get(brandName) || 0) + (snap.view_count || 0))
+        }
+      }
+    }
+
+    // 6. Build the time-series data
     const dates: string[] = []
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.now() - i * 86400000)
       dates.push(d.toISOString().split('T')[0])
     }
 
-    if (brands.length === 0) return NextResponse.json({ data: [], brands: [] })
-
-    // Check if we have snapshots
-    let hasSnapshots = false
-    if (campaignId) {
-      const cnt = await queryOne(`SELECT COUNT(*) as c FROM view_snapshots WHERE campaign_id = $1`, [campaignId])
-      hasSnapshots = (cnt?.c || 0) > 0
-    }
-
-    // Fetch snapshots for each brand per date
-    const trendData = await Promise.all(dates.map(async (date) => {
-      const row: Record<string, string | number> = { date }
-      let total = 0
-      const brandVals: Record<string, number> = {}
-
-      for (const { brand_name } of brands) {
-        const params: any[] = [brand_name, date]
-        let idx = 3
-        let campSql = ''
-        if (campaignId) { campSql = `AND bt.campaign_id = $${idx++}`; params.push(campaignId) }
-
-        const snap = await queryOne(`
-          SELECT SUM(vs.view_count) as sv
-          FROM view_snapshots vs
-          INNER JOIN brand_tags bt ON bt.video_id = vs.video_id
-          WHERE bt.brand_name = $1 AND vs.snapshot_date = $2 ${campSql}
-        `, params)
-
-        const val = snap?.sv ?? 0
-        brandVals[brand_name] = val
-        total += val
+    const trendData = dates.map(date => {
+      const row: Record<string, string | number> = {
+        date: new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', day: '2-digit' }),
       }
 
-      brands.forEach(({ brand_name }: any) => {
-        row[brand_name] = total > 0 ? Math.round((brandVals[brand_name] / total) * 1000) / 10 : 0
-      })
-      return row
-    }))
+      const brandMap = dateBrandViews.get(date)
+      let total = 0
+      if (brandMap) {
+        for (const views of brandMap.values()) total += views
+      }
 
-    const nonEmptyRows = trendData.filter(row =>
-      brands.some((b: any) => (row[b.brand_name] as number) > 0)
-    )
+      for (const brandName of brandNames) {
+        const views = brandMap?.get(brandName) || 0
+        row[brandName] = total > 0 ? Math.round((views / total) * 1000) / 10 : 0
+      }
+
+      return row
+    })
 
     return NextResponse.json({
-      data: hasSnapshots && nonEmptyRows.length > 0 ? nonEmptyRows : trendData,
-      brands: brands.map((b: any) => b.brand_name),
-      has_scrape_data: hasSnapshots
+      data: trendData,
+      brands: brandNames,
+      has_scrape_data: hasSnapshots,
     })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('SOV trend API error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

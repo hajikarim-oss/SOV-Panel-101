@@ -1,41 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll, queryOne } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
-// GET /api/campaigns
 export async function GET() {
   try {
-    const campaigns = await queryAll(`
-      SELECT c.*,
-        (SELECT COUNT(*)::int FROM keywords k WHERE k.campaign_id = c.id AND k.status = 'active') as keyword_count,
-        (SELECT COUNT(*)::int FROM campaign_brands cb WHERE cb.campaign_id = c.id) as brand_count,
-        (SELECT MAX(j.created_at) FROM scrape_jobs j WHERE j.campaign_id = c.id) as last_scraped
-      FROM campaigns c
-      ORDER BY c.created_at DESC
-    `)
+    const { data: campaigns, error } = await supabase
+      .from('campaigns')
+      .select('*')
+      .order('created_at', { ascending: false })
 
-    return NextResponse.json({ campaigns })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    if (error) {
+      console.error('Campaigns GET error:', error)
+      return NextResponse.json({ error: error.message, campaigns: [] }, { status: 500 })
+    }
+
+    const enriched = await Promise.all((campaigns || []).map(async (c: any) => {
+      const [kwRes, brRes, sjRes] = await Promise.all([
+        supabase.from('keywords').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id).eq('status', 'active'),
+        supabase.from('campaign_brands').select('id', { count: 'exact', head: true }).eq('campaign_id', c.id),
+        supabase.from('scrape_jobs').select('created_at').eq('campaign_id', c.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      ])
+      return {
+        ...c,
+        keyword_count: kwRes.count || 0,
+        brand_count: brRes.count || 0,
+        last_scraped: sjRes.data?.created_at || null,
+      }
+    }))
+
+    return NextResponse.json({ campaigns: enriched })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Campaigns API error:', e)
+    return NextResponse.json({ error: msg, campaigns: [] }, { status: 500 })
   }
 }
 
-// POST /api/campaigns
 export async function POST(req: NextRequest) {
   try {
     const { name, category, sub_category, description } = await req.json()
     if (!name?.trim()) return NextResponse.json({ error: 'Campaign name is required' }, { status: 400 })
 
-    const campaign = await queryOne(`
-      INSERT INTO campaigns (name, category, sub_category, description)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (name) DO NOTHING
-      RETURNING *
-    `, [name.trim(), category ?? '', sub_category ?? '', description ?? ''])
+    const { data, error } = await supabase
+      .from('campaigns')
+      .upsert(
+        { name: name.trim(), category: category ?? '', sub_category: sub_category ?? '', description: description ?? '' },
+        { onConflict: 'name', ignoreDuplicates: true }
+      )
+      .select()
+      .maybeSingle()
 
-    if (!campaign) return NextResponse.json({ error: 'Campaign name already exists' }, { status: 409 })
+    if (error) {
+      console.error('Campaigns POST error:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    if (!data) return NextResponse.json({ error: 'Campaign name already exists' }, { status: 409 })
 
-    return NextResponse.json({ campaign }, { status: 201 })
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 })
+    return NextResponse.json({ campaign: data }, { status: 201 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Campaigns POST error:', e)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
