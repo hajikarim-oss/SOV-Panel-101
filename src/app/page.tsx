@@ -121,21 +121,30 @@ function MetricCard({
 function buildTimeline(totalViews: number, days: number, format: 'all' | 'long' | 'short' = 'all') {
   const base = totalViews > 0 ? totalViews / days : 0
   const formatMultiplier = format === 'all' ? 1 : format === 'long' ? 0.75 : 0.25
-  return Array.from({ length: days + 1 }, (_, idx) => {
+  const result: { date: string; views: number; videos: number; keywords: number; dayOfWeek: number }[] = []
+
+  let trend = 1.0
+  for (let idx = 0; idx <= days; idx++) {
     const i = days - idx
     const date = new Date(Date.now() - i * 86400000)
     const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    const noise = base > 0 ? base * (0.6 + Math.random() * 0.8) : Math.random() * 400
+    const dayOfWeek = date.getDay()
+
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
+    const weekdayMultiplier = isWeekend ? 0.7 : 1.1
+    trend += (Math.random() - 0.48) * 0.06
+    trend = Math.max(0.7, Math.min(1.4, trend))
+
+    const noise = base > 0 ? base * (0.85 + Math.random() * 0.3) * weekdayMultiplier * trend : Math.random() * 400
     const finalViews = Math.round(noise * formatMultiplier)
-    const dailyVideos = Math.max(1, Math.floor(finalViews / (format === 'short' ? 400 : 1200)) + 1)
-    const keywordsAdded = i === days ? 0 : Math.max(0, Math.floor(Math.random() * 3))
-    return {
-      date: label,
-      views: finalViews,
-      videos: dailyVideos,
-      keywords: keywordsAdded,
-    }
-  })
+    const dailyVideos = base > 0
+      ? Math.max(1, Math.round(finalViews / (format === 'short' ? 5000 : 15000) * (0.8 + Math.random() * 0.4)))
+      : Math.max(1, Math.floor(Math.random() * 5) + 1)
+    const keywordsAdded = i === days ? 0 : Math.max(0, Math.round(Math.random() * 4 * weekdayMultiplier))
+
+    result.push({ date: label, views: finalViews, videos: dailyVideos, keywords: keywordsAdded, dayOfWeek })
+  }
+  return result
 }
 
 // ── Demo Data (Water Purifier market) ────────────────────────────────────
@@ -207,15 +216,22 @@ const DEMO_SCATTER = [
 ]
 function buildDemoTimeline(days: number) {
   const baseViews = 15_100_000
-  return Array.from({length:days+1},(_,idx)=>{
-    const i = days-idx
-    const date = new Date(Date.now()-i*86400000)
-    const label = date.toLocaleDateString('en-US',{month:'short',day:'numeric'})
-    const noise = baseViews*(0.7+Math.sin(i*0.4)*0.15+(Math.floor(i*13)%7)*0.03)
-    const dailyVideos = 8000+Math.round(Math.sin(i*0.6)*2000+(Math.floor(i*17)%5)*800)
-    const keywordsAdded = i === days ? 0 : Math.max(0, Math.floor(2 + Math.random() * 5))
-    return { date: label, views: Math.round(noise), videos: dailyVideos, keywords: keywordsAdded }
-  })
+  const result: { date: string; views: number; videos: number; keywords: number }[] = []
+  let trend = 1.0
+  for (let idx = 0; idx <= days; idx++) {
+    const i = days - idx
+    const date = new Date(Date.now() - i * 86400000)
+    const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6
+    const weekdayMult = isWeekend ? 0.72 : 1.08
+    trend += (Math.random() - 0.47) * 0.05
+    trend = Math.max(0.75, Math.min(1.35, trend))
+    const views = Math.round(baseViews * (0.85 + Math.random() * 0.3) * weekdayMult * trend)
+    const dailyVideos = Math.max(50, Math.round(views / 18000 * (0.8 + Math.random() * 0.4)))
+    const keywordsAdded = i === days ? 0 : Math.max(0, Math.round(3 * weekdayMult + Math.random() * 4))
+    result.push({ date: label, views, videos: dailyVideos, keywords: keywordsAdded })
+  }
+  return result
 }
 
 // ── Tooltips ───────────────────────────────────────────────────────────
@@ -984,10 +1000,10 @@ export default function OverviewPage() {
               }
             >
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={timeline} margin={{ top: 8, right: 30, left: -10, bottom: 0 }}>
+                <ComposedChart data={timeline} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.18} />
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.2} />
                       <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
                     </linearGradient>
                   </defs>
@@ -995,12 +1011,11 @@ export default function OverviewPage() {
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
                   <YAxis yAxisId="L" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
                   <YAxis yAxisId="R" orientation="right" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="R2" orientation="right" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
                   <Tooltip
                     content={({ active, payload, label }: any) => {
                       if (!active || !payload?.length) return null
                       const sorted = [...payload].sort((a: any, b: any) => {
-                        const order: Record<string, number> = { 'Views': 0, 'Daily videos': 1, 'Keywords added': 2 }
+                        const order: Record<string, number> = { 'Views': 0, 'New videos': 1, 'Keywords added': 2 }
                         return (order[a.name] ?? 9) - (order[b.name] ?? 9)
                       })
                       return (
@@ -1019,9 +1034,8 @@ export default function OverviewPage() {
                       )
                     }}
                   />
+                  <Bar yAxisId="R" dataKey="videos" name="New videos" fill="#1A73E8" fillOpacity={0.55} radius={[2, 2, 0, 0]} barSize={6} />
                   <Area yAxisId="L" type="monotone" dataKey="views" name="Views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv)" dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: '#10B981' }} />
-                  <Bar yAxisId="R" dataKey="videos" name="Daily videos" fill="#1A73E8" fillOpacity={0.75} radius={[3, 3, 0, 0]} barSize={7} />
-                  <Line yAxisId="R2" type="monotone" dataKey="keywords" name="Keywords added" stroke="#8B5CF6" strokeWidth={2} dot={{ r: 3, fill: '#8B5CF6', strokeWidth: 2, stroke: '#FFF' }} strokeDasharray="6 4" />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 6 }} />
                 </ComposedChart>
               </ResponsiveContainer>
