@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
 export const runtime = 'nodejs'
 
@@ -11,41 +11,54 @@ export async function GET(req: NextRequest) {
   if (!campaignId) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
   try {
-    // Get all brands in campaign
-    const brands = await queryAll(`SELECT name FROM campaign_brands WHERE campaign_id = $1`, [campaignId])
-    const brandNames = brands.map((b: any) => b.name)
+    let cbQuery = supabase.from('campaign_brands').select('name').eq('campaign_id', campaignId)
+    const { data: brandRows } = await cbQuery
+    let brandNames = (brandRows || []).map((b: any) => b.name)
 
-    // Get keywords
-    let conditions = ['k.campaign_id = $1']
-    const params: any[] = [campaignId]
-    let idx = 2
-    if (language !== 'all') { conditions.push(`k.language = $${idx++}`); params.push(language) }
-    if (type !== 'all') { conditions.push(`k.type = $${idx++}`); params.push(type) }
+    if (brandNames.length === 0) {
+      const { data: btRows } = await supabase.from('brand_tags').select('brand_name').eq('campaign_id', campaignId)
+      brandNames = [...new Set((btRows || []).map((bt: any) => bt.brand_name))].sort()
+    }
 
-    const keywords = await queryAll(`
-      SELECT k.id, k.text, k.type, k.language, k.status
-      FROM keywords k
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY k.created_at DESC
-    `, params)
+    let kwQuery = supabase.from('keywords').select('id, text, type, language, status').eq('campaign_id', campaignId).order('created_at', { ascending: false })
+    if (language !== 'all') kwQuery = kwQuery.eq('language', language)
+    if (type !== 'all') kwQuery = kwQuery.eq('category', type)
 
-    const data = keywords.map((kw: any) => {
-      // Get videos for this keyword (long form only for simplicity in SOV view)
-      const videos: any[] = [] // Will be populated synchronously
-      return { keyword: kw.text, total_videos: 0 }
-    })
+    const { data: keywords } = await kwQuery
+    if (!keywords || keywords.length === 0) {
+      return NextResponse.json({ data: [], brandNames })
+    }
 
-    // For each keyword, get video views and brand distribution
-    const enrichedData = await Promise.all(keywords.map(async (kw: any) => {
-      const videos = await queryAll(`
-        SELECT v.id, v.view_count, v.title, v.channel_name, v.tags
-        FROM videos v
-        WHERE v.id IN (
-          SELECT video_id FROM keyword_videos WHERE keyword_id = $1
-          UNION
-          SELECT video_id FROM keyword_shorts WHERE keyword_id = $1
-        )
-      `, [kw.id])
+    const kwIds = keywords.map((k: any) => k.id)
+
+    const [kvRes, ksRes] = await Promise.all([
+      supabase.from('keyword_videos').select('keyword_id, video_id').in('keyword_id', kwIds),
+      supabase.from('keyword_shorts').select('keyword_id, video_id').in('keyword_id', kwIds),
+    ])
+
+    const kwVideoMap = new Map<string, Set<string>>()
+    for (const kv of kvRes.data || []) {
+      if (!kwVideoMap.has(kv.keyword_id)) kwVideoMap.set(kv.keyword_id, new Set())
+      kwVideoMap.get(kv.keyword_id)!.add(kv.video_id)
+    }
+    for (const ks of ksRes.data || []) {
+      if (!kwVideoMap.has(ks.keyword_id)) kwVideoMap.set(ks.keyword_id, new Set())
+      kwVideoMap.get(ks.keyword_id)!.add(ks.video_id)
+    }
+
+    const allVideoIds = [...new Set([...(kvRes.data || []).map((r: any) => r.video_id), ...(ksRes.data || []).map((r: any) => r.video_id)])]
+
+    const videoMap = new Map<string, any>()
+    const BATCH = 500
+    for (let i = 0; i < allVideoIds.length; i += BATCH) {
+      const batch = allVideoIds.slice(i, i + BATCH)
+      const { data } = await supabase.from('videos').select('id, view_count, title, channel_name, tags').in('id', batch)
+      for (const v of (data || []) as any[]) videoMap.set(v.id, v)
+    }
+
+    const enrichedData = keywords.map((kw: any) => {
+      const videoIds = kwVideoMap.get(kw.id) || new Set()
+      const videos = [...videoIds].map(id => videoMap.get(id)).filter(Boolean)
 
       const totalViews = videos.reduce((acc: number, v: any) => acc + (v.view_count || 0), 0)
 
@@ -61,8 +74,8 @@ export async function GET(req: NextRequest) {
             if (Array.isArray(v.tags)) tagsArr = v.tags
             else try { tagsArr = JSON.parse(v.tags || '[]') } catch {}
             return tagsArr.some((t: string) => t.toLowerCase() === bName.toLowerCase()) ||
-              v.title.toLowerCase().includes(bName.toLowerCase()) ||
-              v.channel_name.toLowerCase().includes(bName.toLowerCase())
+              (v.title || '').toLowerCase().includes(bName.toLowerCase()) ||
+              (v.channel_name || '').toLowerCase().includes(bName.toLowerCase())
           })
           .reduce((acc: number, v: any) => acc + (v.view_count || 0), 0)
 
@@ -73,10 +86,12 @@ export async function GET(req: NextRequest) {
 
       entry['Other'] = parseFloat(Math.max(0, 100 - brandTotal).toFixed(1))
       return entry
-    }))
+    })
 
     return NextResponse.json({ data: enrichedData, brandNames })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    console.error('Keyword SOV API error:', err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

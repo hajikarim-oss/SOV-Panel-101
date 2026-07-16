@@ -20,8 +20,21 @@ export async function GET(req: NextRequest) {
 
     if (!hasBrandTagData && campaignId) {
       const { data: registered } = await supabase.from('campaign_brands').select('name as brand_name').eq('campaign_id', campaignId).order('created_at', { ascending: true })
-      const fallback = (registered || []).map((b: any, i: number) => ({
-        brand_name: b.brand_name, currentValue: 0, previousValue: 0,
+      if (registered && registered.length > 0) {
+        const fallback = registered.map((b: any, i: number) => ({
+          brand_name: b.brand_name, currentValue: 0, previousValue: 0,
+          growthPercent: 0, rankMovement: 0, currentRank: i + 1,
+          sparklineData: new Array(periodDays).fill(0), video_count: 0, has_data: false,
+        }))
+        return NextResponse.json({ data: fallback, period, has_scrape_data: false })
+      }
+      const { data: btRows } = await supabase.from('brand_tags').select('brand_name').eq('campaign_id', campaignId)
+      const btBrands = [...new Set((btRows || []).map((bt: any) => bt.brand_name))].sort()
+      if (btBrands.length === 0) {
+        return NextResponse.json({ data: [], period, has_scrape_data: false })
+      }
+      const fallback = btBrands.map((name, i) => ({
+        brand_name: name, currentValue: 0, previousValue: 0,
         growthPercent: 0, rankMovement: 0, currentRank: i + 1,
         sparklineData: new Array(periodDays).fill(0), video_count: 0, has_data: false,
       }))

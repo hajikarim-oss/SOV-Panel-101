@@ -6,16 +6,21 @@ export async function GET(req: NextRequest) {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')
 
-    // 1. Get brand names
+    // 1. Get brand names - fallback to brand_tags if campaign_brands is empty
     let brandQuery = supabase.from('campaign_brands').select('name')
     if (campaignId) brandQuery = brandQuery.eq('campaign_id', campaignId)
     const { data: brandRows } = await brandQuery
 
-    if (!brandRows || brandRows.length === 0) {
-      return NextResponse.json({ data: [], brands: [], has_scrape_data: false })
+    let brandNames: string[] = (brandRows || []).map((b: any) => b.name)
+
+    if (brandNames.length === 0 && campaignId) {
+      const { data: btRows } = await supabase.from('brand_tags').select('brand_name').eq('campaign_id', campaignId)
+      brandNames = [...new Set((btRows || []).map((bt: any) => bt.brand_name))].sort()
     }
 
-    const brandNames = [...new Set(brandRows.map((b: any) => b.name))].sort()
+    if (brandNames.length === 0) {
+      return NextResponse.json({ data: [], brands: [], has_scrape_data: false })
+    }
 
     // 2. Get all video_ids tagged with these brands
     let btQuery = supabase.from('brand_tags').select('video_id, brand_name')

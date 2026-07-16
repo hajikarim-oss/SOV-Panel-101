@@ -10,7 +10,25 @@ export async function GET(req: NextRequest) {
       const { data: brandList } = await cbQuery
 
       if (!brandList || brandList.length === 0) {
-        return NextResponse.json({ data: [], has_scrape_data: false })
+        const { data: btRows } = await supabase.from('brand_tags').select('brand_name').eq('campaign_id', campaignId)
+        const btBrands = [...new Set((btRows || []).map((bt: any) => bt.brand_name))].sort()
+        if (btBrands.length === 0) {
+          return NextResponse.json({ data: [], has_scrape_data: false })
+        }
+        const enriched = await Promise.all(btBrands.map(async (bName: string) => {
+          const { count } = await supabase.from('brand_tags').select('id', { count: 'exact', head: true }).eq('brand_name', bName).eq('campaign_id', campaignId)
+          const { data: viewRows } = await supabase.from('brand_tags').select('video_id').eq('brand_name', bName).eq('campaign_id', campaignId)
+          const videoIds = (viewRows || []).map((r: any) => r.video_id)
+          let totalViews = 0
+          const BATCH = 500
+          for (let i = 0; i < videoIds.length; i += BATCH) {
+            const batch = videoIds.slice(i, i + BATCH)
+            const { data } = await supabase.from('videos').select('view_count').in('id', batch)
+            totalViews += (data || []).reduce((sum: number, v: any) => sum + (v.view_count || 0), 0)
+          }
+          return { name: bName, type: 'derived', video_count: count || 0, total_views: totalViews, total_mentions: count || 0, product_mentions: 0, created_at: new Date().toISOString() }
+        }))
+        return NextResponse.json({ data: enriched, has_scrape_data: true })
       }
 
       const enriched = await Promise.all(brandList.map(async (b: any) => {
