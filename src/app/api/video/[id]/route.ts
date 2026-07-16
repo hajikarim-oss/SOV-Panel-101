@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { queryAll, queryOne } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
 
-// GET /api/video/[id]
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -10,75 +9,63 @@ export async function GET(
     const { id: youtubeId } = await params
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
 
-    // Main video record
-    const video = await queryOne(`
-      SELECT v.*, cv.first_seen_at, cv.campaign_id
-      FROM videos v
-      LEFT JOIN campaign_videos cv ON cv.video_id = v.id
-      ${campaignId ? 'WHERE v.youtube_id = $1 AND cv.campaign_id = $2' : 'WHERE v.youtube_id = $1'}
-      LIMIT 1
-    `, campaignId ? [youtubeId, campaignId] : [youtubeId])
+    const { data: video } = await supabase.from('videos').select('*').eq('youtube_id', youtubeId).single()
+    if (!video) return NextResponse.json({ error: 'Video not found' }, { status: 404 })
 
-    if (!video) {
-      return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+    let firstSeenAt = null
+    let videoCampaignId = null
+    if (campaignId) {
+      const { data: cv } = await supabase.from('campaign_videos').select('first_seen_at, campaign_id').eq('video_id', video.id).eq('campaign_id', campaignId).maybeSingle()
+      firstSeenAt = cv?.first_seen_at || null
+      videoCampaignId = cv?.campaign_id || null
+    } else {
+      const { data: cv } = await supabase.from('campaign_videos').select('first_seen_at, campaign_id').eq('video_id', video.id).order('first_seen_at', { ascending: false }).limit(1).maybeSingle()
+      firstSeenAt = cv?.first_seen_at || null
+      videoCampaignId = cv?.campaign_id || null
     }
 
-    // Keyword rank appearances
-    const kwRanks = await queryAll(`
-      SELECT k.text as keyword_text, kv.rank, k.language
-      FROM keyword_videos kv
-      INNER JOIN keywords k ON k.id = kv.keyword_id
-      WHERE kv.video_id = $1
-      ${campaignId ? 'AND kv.campaign_id = $2' : ''}
-      UNION ALL
-      SELECT k.text as keyword_text, ks.rank, k.language
-      FROM keyword_shorts ks
-      INNER JOIN keywords k ON k.id = ks.keyword_id
-      WHERE ks.video_id = $1
-      ${campaignId ? 'AND ks.campaign_id = $2' : ''}
-      ORDER BY rank ASC
-    `, campaignId ? [video.id, campaignId] : [video.id])
+    const [kvRes, ksRes] = await Promise.all([
+      supabase.from('keyword_videos').select('keyword_id, rank').eq('video_id', video.id).then(async (r) => {
+        if (!r.data || r.data.length === 0) return { data: [] }
+        const kwIds = [...new Set(r.data.map((d: any) => d.keyword_id))]
+        const { data: kws } = await supabase.from('keywords').select('id, text, language').in('id', kwIds)
+        const kwMap = new Map((kws || []).map((k: any) => [k.id, k]))
+        return { data: r.data.map((d: any) => ({ keyword_text: kwMap.get(d.keyword_id)?.text || d.keyword_id, rank: d.rank, language: kwMap.get(d.keyword_id)?.language || null })) }
+      }),
+      supabase.from('keyword_shorts').select('keyword_id, rank').eq('video_id', video.id).then(async (r) => {
+        if (!r.data || r.data.length === 0) return { data: [] }
+        const kwIds = [...new Set(r.data.map((d: any) => d.keyword_id))]
+        const { data: kws } = await supabase.from('keywords').select('id, text, language').in('id', kwIds)
+        const kwMap = new Map((kws || []).map((k: any) => [k.id, k]))
+        return { data: r.data.map((d: any) => ({ keyword_text: kwMap.get(d.keyword_id)?.text || d.keyword_id, rank: d.rank, language: kwMap.get(d.keyword_id)?.language || null })) }
+      }),
+    ])
 
-    // Best rank across all keywords
+    const kwRanks = [...(kvRes.data || []), ...(ksRes.data || [])].sort((a: any, b: any) => a.rank - b.rank)
     const bestRank = kwRanks.length > 0 ? Math.min(...kwRanks.map((k: any) => k.rank)) : null
 
-    // View history from snapshots
-    const viewHistory = await queryAll(`
-      SELECT snapshot_date as date, view_count as views
-      FROM view_snapshots
-      WHERE video_id = $1
-      ORDER BY snapshot_date ASC
-      LIMIT 60
-    `, [video.id])
+    const { data: viewHistory } = await supabase.from('view_snapshots').select('snapshot_date as date, view_count as views').eq('video_id', video.id).order('snapshot_date', { ascending: true }).limit(60)
 
-    // Other videos from same channel in campaign
-    const relatedVideos = await queryAll(`
-      SELECT v.youtube_id, v.title, v.view_count, v.published_at
-      FROM videos v
-      INNER JOIN campaign_videos cv ON cv.video_id = v.id
-      WHERE v.channel_name = $1 AND v.youtube_id != $2
-      ${campaignId ? 'AND cv.campaign_id = $3' : ''}
-      ORDER BY v.view_count DESC
-      LIMIT 5
-    `, campaignId ? [video.channel_name, youtubeId, campaignId] : [video.channel_name, youtubeId])
+    let relatedVideos: any[] = []
+    if (video.channel_name) {
+      let relQ = supabase.from('videos').select('youtube_id, title, view_count, published_at').eq('channel_name', video.channel_name).neq('youtube_id', youtubeId).order('view_count', { ascending: false }).limit(5)
+      if (campaignId) {
+        const { data: cvIds } = await supabase.from('campaign_videos').select('video_id').eq('campaign_id', campaignId)
+        if (cvIds && cvIds.length > 0) {
+          relQ = relQ.in('id', cvIds.map((c: any) => c.video_id))
+        }
+      }
+      const { data: relData } = await relQ
+      relatedVideos = relData || []
+    }
 
-    // Brand tags for this video
-    const tags = await queryAll(`
-      SELECT brand_name FROM brand_tags WHERE video_id = $1
-      ${campaignId ? 'AND campaign_id = $2' : ''}
-    `, campaignId ? [video.id, campaignId] : [video.id])
+    let tagQuery = supabase.from('brand_tags').select('brand_name').eq('video_id', video.id)
+    if (campaignId) tagQuery = tagQuery.eq('campaign_id', campaignId)
+    const { data: tagRows } = await tagQuery
 
-    // AI brand analysis results
-    const brandAnalysis = await queryAll(`
-      SELECT brand_name, confidence, mention_type, context_quotes
-      FROM brand_analysis WHERE video_id = $1
-      ORDER BY confidence DESC
-    `, [video.id])
+    const { data: brandAnalysis } = await supabase.from('brand_analysis').select('brand_name, confidence, mention_type, context_quotes').eq('video_id', video.id).order('confidence', { ascending: false })
 
-    // Transcript status
-    const transcript = await queryOne(`
-      SELECT language, fetched_at FROM video_transcripts WHERE video_id = $1
-    `, [video.id])
+    const { data: transcript } = await supabase.from('video_transcripts').select('language, fetched_at').eq('video_id', video.id).maybeSingle()
 
     return NextResponse.json({
       video: {
@@ -92,16 +79,16 @@ export async function GET(
         duration: video.duration,
         published_at: video.published_at,
         thumbnail_url: video.thumbnail_url,
-        first_seen_at: video.first_seen_at,
+        first_seen_at: firstSeenAt,
         is_short: (video.duration_sec || 0) < 240,
         description: video.description,
       },
       kwRanks,
       bestRank,
-      viewHistory,
+      viewHistory: viewHistory || [],
       relatedVideos,
-      tags: tags.map((t: any) => t.brand_name),
-      brandAnalysis: brandAnalysis.map((b: any) => ({
+      tags: (tagRows || []).map((t: any) => t.brand_name),
+      brandAnalysis: (brandAnalysis || []).map((b: any) => ({
         ...b,
         context_quotes: typeof b.context_quotes === 'string' ? JSON.parse(b.context_quotes || '[]') : b.context_quotes || [],
       })),
@@ -109,6 +96,7 @@ export async function GET(
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('Video detail API error:', e)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
