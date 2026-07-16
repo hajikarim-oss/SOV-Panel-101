@@ -118,6 +118,7 @@ export default function LeaderboardPage() {
   const [customTagInput, setCustomTagInput] = useState('')
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [batchAnalyzing, setBatchAnalyzing] = useState(false)
+  const [expandedKeywords, setExpandedKeywords] = useState<Set<string>>(new Set())
 
   const fetchVideos = useCallback(async (campId: string, t: 'long' | 'short', s: 'views' | 'frequency' | 'rank', p: number, brand = '', kwId = '', qStr = '', channel = '') => {
     if (!campId) return
@@ -476,25 +477,58 @@ export default function LeaderboardPage() {
                       </td>
                       <td style={{ minWidth: 180 }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-                          {video.keyword_ranks && video.keyword_ranks.length > 0 ? video.keyword_ranks.map((kr, idx) => (
-                            <span
-                              key={`kw-${idx}`}
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 3,
-                                fontSize: 9.5,
-                                padding: '2px 6px',
-                                borderRadius: 4,
-                                background: 'rgba(26,115,232,0.06)',
-                                border: '1px solid rgba(26,115,232,0.15)',
-                                color: '#1A73E8',
-                                fontWeight: 600,
-                              }}
-                            >
-                              {kr.keyword_text.length > 18 ? kr.keyword_text.slice(0, 18) + '…' : kr.keyword_text}: <strong>#{kr.rank}</strong>
-                            </span>
-                          )) : (
+                          {video.keyword_ranks && video.keyword_ranks.length > 0 ? (() => {
+                            const kwExpanded = expandedKeywords.has(video.youtube_id)
+                            const shown = kwExpanded ? video.keyword_ranks : video.keyword_ranks.slice(0, 2)
+                            const remaining = video.keyword_ranks.length - 2
+                            return (
+                              <>
+                                {shown.map((kr, idx) => (
+                                  <span
+                                    key={`kw-${idx}`}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 3,
+                                      fontSize: 9.5,
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      background: 'rgba(26,115,232,0.06)',
+                                      border: '1px solid rgba(26,115,232,0.15)',
+                                      color: '#1A73E8',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {kr.keyword_text.length > 18 ? kr.keyword_text.slice(0, 18) + '…' : kr.keyword_text}: <strong>#{kr.rank}</strong>
+                                  </span>
+                                ))}
+                                {!kwExpanded && remaining > 0 && (
+                                  <button
+                                    onClick={() => setExpandedKeywords(prev => new Set(prev).add(video.youtube_id))}
+                                    style={{
+                                      background: 'none', border: 'none', color: '#1A73E8', fontSize: 9,
+                                      fontWeight: 700, cursor: 'pointer', padding: '2px 4px', display: 'inline-flex',
+                                      alignItems: 'center', gap: 1,
+                                    }}
+                                  >
+                                    +{remaining} more <ChevronDown size={8} />
+                                  </button>
+                                )}
+                                {kwExpanded && (
+                                  <button
+                                    onClick={() => setExpandedKeywords(prev => { const n = new Set(prev); n.delete(video.youtube_id); return n })}
+                                    style={{
+                                      background: 'none', border: 'none', color: '#64748B', fontSize: 9,
+                                      fontWeight: 700, cursor: 'pointer', padding: '2px 4px', display: 'inline-flex',
+                                      alignItems: 'center', gap: 1,
+                                    }}
+                                  >
+                                    Less <ChevronUp size={8} />
+                                  </button>
+                                )}
+                              </>
+                            )
+                          })() : (
                             <span style={{ fontSize: 11, color: '#CBD5E1' }}>—</span>
                           )}
                         </div>
