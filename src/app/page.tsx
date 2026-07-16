@@ -376,17 +376,14 @@ export default function OverviewPage() {
     }
     setLoading(true)
     try {
-      const [ovRes, kwRes, vidRes] = await Promise.all([
-        fetch(`/api/overview?campaign_id=${campId}`),
-        fetch(`/api/keywords?campaign_id=${campId}`),
-        fetch(`/api/videos/leaderboard?campaign_id=${campId}&limit=200&sort=views`)
-      ])
-      const [ovData, kwData, vidData] = await Promise.all([ovRes.json(), kwRes.json(), vidRes.json()])
-      setOverview(ovData)
-      setKeywords(kwData.keywords ?? [])
-      setVideos(vidData.data ?? [])
-      setHasData(!ovData.error && ovData.totalVideos > 0)
-      setClientCache(`overview:${campId}`, { overview: ovData, keywords: kwData.keywords ?? [], videos: vidData.data ?? [] })
+      // Single consolidated endpoint: 1 API call instead of 3
+      const res = await fetch(`/api/dashboard?campaign_id=${campId}`)
+      const d = await res.json()
+      setOverview(d.overview)
+      setKeywords(d.keywords ?? [])
+      setVideos(d.topVideos ?? [])
+      setHasData(!d.overview?.error && d.overview?.totalVideos > 0)
+      setClientCache(`overview:${campId}`, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [] })
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
