@@ -19,6 +19,11 @@ export async function GET(req: NextRequest) {
     if (cid) kwQuery = kwQuery.eq('campaign_id', cid)
     const { count: kwCountVal } = await kwQuery
 
+    let cvQuery = supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true })
+    if (cid) cvQuery = cvQuery.eq('campaign_id', cid)
+    const { count: totalVideoPoolVal } = await cvQuery
+    const totalVideos = totalVideoPoolVal || 0
+
     let kvQuery = supabase.from('keyword_videos').select('id', { count: 'exact', head: true })
     if (cid) kvQuery = kvQuery.eq('campaign_id', cid)
     const { count: kvCountVal } = await kvQuery
@@ -27,7 +32,7 @@ export async function GET(req: NextRequest) {
     if (cid) ksQuery = ksQuery.eq('campaign_id', cid)
     const { count: ksCountVal } = await ksQuery
 
-    const totalVideos = (kvCountVal || 0) + (ksCountVal || 0)
+    const rankedVideos = (kvCountVal || 0) + (ksCountVal || 0)
 
     const today = new Date().toISOString().split('T')[0]
     const d1 = new Date(Date.now() - 86400000).toISOString().split('T')[0]
@@ -43,14 +48,10 @@ export async function GET(req: NextRequest) {
 
     const [vsToday, vs1d, vs7d, vs30d] = await Promise.all([sumViews(today), sumViews(d1), sumViews(d7), sumViews(d30)])
 
-    let kvForStats = supabase.from('keyword_videos').select('video_id')
-    let ksForStats = supabase.from('keyword_shorts').select('video_id')
-    if (cid) {
-      kvForStats = kvForStats.eq('campaign_id', cid)
-      ksForStats = ksForStats.eq('campaign_id', cid)
-    }
-    const [kvRes, ksRes] = await Promise.all([kvForStats, ksForStats])
-    const allVideoIds = [...new Set([...(kvRes.data || []).map((r: any) => r.video_id), ...(ksRes.data || []).map((r: any) => r.video_id)])]
+    let cvForStats = supabase.from('campaign_videos').select('video_id')
+    if (cid) cvForStats = cvForStats.eq('campaign_id', cid)
+    const { data: cvStatsRows } = await cvForStats
+    const allVideoIds = [...new Set((cvStatsRows || []).map((r: any) => r.video_id))]
 
     let unique_count = 0
     let total_viewership = 0
@@ -94,13 +95,32 @@ export async function GET(req: NextRequest) {
       if (maxChannel) topChannels = [{ channel_name: maxChannel, freq: maxFreq }]
     }
 
-    let cvQuery = supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true })
-    if (cid) cvQuery = cvQuery.eq('campaign_id', cid)
-    cvQuery = cvQuery.gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString())
-    const { count: newVidsVal } = await cvQuery
+    let newVidQuery = supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true })
+    if (cid) newVidQuery = newVidQuery.eq('campaign_id', cid)
+    newVidQuery = newVidQuery.gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString())
+    const { count: newVidsVal } = await newVidQuery
 
-    let untaggedQuery = supabase.from('videos').select('id', { count: 'exact', head: true }).eq('is_deleted', false).or('tags.is.null,tags.eq.{}')
-    const { count: untaggedVal } = await untaggedQuery
+    let untaggedVal = 0
+    if (cid) {
+      let cvForTagging = supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid)
+      const { data: cvTagRows } = await cvForTagging
+      const allCvVideoIds = (cvTagRows || []).map((r: any) => r.video_id)
+
+      if (allCvVideoIds.length > 0) {
+        const BATCH = 500
+        const taggedIds = new Set<string>()
+        for (let i = 0; i < allCvVideoIds.length; i += BATCH) {
+          const batch = allCvVideoIds.slice(i, i + BATCH)
+          const { data: btRows } = await supabase.from('brand_tags').select('video_id').in('video_id', batch).eq('campaign_id', cid)
+          for (const bt of (btRows || []) as any[]) taggedIds.add(bt.video_id)
+        }
+        untaggedVal = allCvVideoIds.length - taggedIds.size
+      }
+    } else {
+      let untaggedQuery = supabase.from('videos').select('id', { count: 'exact', head: true }).eq('is_deleted', false).or('tags.is.null,tags.eq.{}')
+      const { count: uv } = await untaggedQuery
+      untaggedVal = uv || 0
+    }
 
     let btQuery = supabase.from('brand_tags').select('brand_name, video_id')
     if (cid) btQuery = btQuery.eq('campaign_id', cid)
@@ -167,6 +187,7 @@ export async function GET(req: NextRequest) {
       lastUpdatedRanking: lastRanking,
       totalKeywords: kwCountVal || 0,
       totalVideos,
+      rankedVideos,
       totalViewership: vs.total_viewership,
       uniqueVideos: vs.unique_count,
       uniqueVideoViewership: vs.total_viewership,

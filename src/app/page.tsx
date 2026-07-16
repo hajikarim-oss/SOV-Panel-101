@@ -823,13 +823,13 @@ export default function OverviewPage() {
                 color="#1A73E8"
                 info="Total number of active keywords being monitored in this campaign."
               />
-              <Link href="/leaderboard" style={{ textDecoration: 'none' }}>
+              <Link href="/videos" style={{ textDecoration: 'none' }}>
                 <MetricCard
                   label="Total Videos"
                   value={fmt(overview?.totalVideos ?? 0)}
                   icon={Video}
                   color="#8B5CF6"
-                  info="Total keyword–video matches across all keywords. Click to view all."
+                  info="All videos discovered across all keywords. Click to browse."
                 />
               </Link>
               <MetricCard
@@ -881,13 +881,15 @@ export default function OverviewPage() {
                 color="#F59E0B"
                 info="Videos newly indexed in the last 7 days that were not present before."
               />
-              <MetricCard
-                label="Pending Tagging"
-                value={fmt(overview?.untaggedVideos ?? 0)}
-                icon={Video}
-                color="#EF4444"
-                info="Videos not yet assigned to any brand portfolio in Brand Tags."
-              />
+              <Link href="/pending-tagging" style={{ textDecoration: 'none' }}>
+                <MetricCard
+                  label="Pending Tagging"
+                  value={fmt(overview?.untaggedVideos ?? 0)}
+                  icon={Video}
+                  color="#EF4444"
+                  info="Top-ranked videos not yet assigned a brand. Click to tag them."
+                />
+              </Link>
               <MetricCard
                 label="Active Creators"
                 value={fmt(overview?.uniqueChannels ?? 0)}
