@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getQueue, QUEUE_NAMES, addJob, DailyViewsJobData, WeeklyRefreshJobData } from '@/lib/queue'
-import { getSystemMetadata } from '@/lib/migrations'
+import { runDailyViewUpdatePg, runWeeklyKeywordRefreshPg } from '@/lib/scrape-pipeline-pg'
+import { refreshMaterializedViews, setSystemMetadata, getSystemMetadata } from '@/lib/migrations'
 
-export async function POST(req: NextRequest) {
+export const runtime = 'nodejs'
+
+// Vercel cron calls this endpoint directly — no BullMQ needed
+// Workers can't run on serverless (no persistent process)
+export async function GET(req: NextRequest) {
   return handleCron(req)
 }
-
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   return handleCron(req)
 }
 
 async function handleCron(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret')
   const expected = process.env.CRON_SECRET
-
   if (expected && secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -22,50 +24,39 @@ async function handleCron(req: NextRequest) {
   const campaignId = req.nextUrl.searchParams.get('campaign_id') ?? undefined
   const isMonday = new Date().getDay() === 1
 
+  const results: Record<string, unknown> = { job, ran_at: new Date().toISOString() }
+
   try {
-    const results: Record<string, unknown> = { job, ran_at: new Date().toISOString() }
-
+    // Run daily views directly (no queue — workers don't run on Vercel)
     if (job === 'daily_views' || job === 'auto') {
-      const dailyQueue = getQueue<DailyViewsJobData>(QUEUE_NAMES.DAILY_VIEWS)
-      const dailyJob = await dailyQueue.add('daily-views', {
-        campaignId,
-      }, {
-        jobId: `daily-${Date.now()}`,
-        priority: 0,
-      })
-
-      results.daily_views = {
-        job_id: dailyJob.id,
-        status: 'queued',
-        message: 'Daily views update queued for background processing',
-      }
+      console.log(`[Cron] Starting daily views update${campaignId ? ` for campaign ${campaignId}` : ''}`)
+      const result = await runDailyViewUpdatePg(campaignId)
+      await refreshMaterializedViews()
+      await setSystemMetadata('last_views_refresh', new Date().toISOString())
+      results.daily_views = { ...result, status: 'completed' }
+      console.log(`[Cron] Daily views: ${result.updated} updated, ${result.deleted} deleted`)
     }
 
+    // Run weekly refresh on Mondays
     if (job === 'weekly_refresh' || (job === 'auto' && isMonday)) {
-      const weeklyQueue = getQueue<WeeklyRefreshJobData>(QUEUE_NAMES.WEEKLY_REFRESH)
-      const weeklyJob = await weeklyQueue.add('weekly-refresh', {
-        campaignId,
-      }, {
-        jobId: `weekly-${Date.now()}`,
-        priority: 0,
-      })
-
-      results.weekly_refresh = {
-        job_id: weeklyJob.id,
-        status: 'queued',
-        message: 'Weekly keyword refresh queued for background processing',
-      }
+      console.log('[Cron] Starting weekly keyword refresh')
+      const result = await runWeeklyKeywordRefreshPg(campaignId)
+      await refreshMaterializedViews()
+      await setSystemMetadata('last_ranking_refresh', new Date().toISOString())
+      await setSystemMetadata('last_weekly_refresh', new Date().toISOString())
+      results.weekly_refresh = { ...result, status: 'completed' }
+      console.log(`[Cron] Weekly refresh: ${result.keywords_processed} keywords`)
     }
 
     results.metadata = {
       last_views_refresh: await getSystemMetadata('last_views_refresh'),
       last_ranking_refresh: await getSystemMetadata('last_ranking_refresh'),
-      last_weekly_refresh: await getSystemMetadata('last_weekly_refresh'),
     }
 
     return NextResponse.json({ ok: true, ...results })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
+    console.error('[Cron] Error:', msg)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

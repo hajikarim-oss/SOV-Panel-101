@@ -3,6 +3,14 @@
     {
       "path": "/api/warm",
       "schedule": "*/4 * * * *"
+    },
+    {
+      "path": "/api/cron?job=daily_views",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron?job=weekly_refresh",
+      "schedule": "0 6 * * 1"
     }
   ]
 }
