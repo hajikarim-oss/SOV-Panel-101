@@ -68,6 +68,7 @@ export default function KeywordSovPage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
   const [lang, setLang] = useState('all')
   const [type, setType] = useState('all')
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
   const [data, setData] = useState<any[]>([])
   const [brands, setBrands] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -82,9 +83,9 @@ export default function KeywordSovPage() {
   const [editType, setEditType] = useState('generic')
   const [editSaving, setEditSaving] = useState(false)
 
-  const fetchSOV = useCallback(async (campId: string, l: string, t: string) => {
+  const fetchSOV = useCallback(async (campId: string, l: string, t: string, o?: string) => {
     if (!campId) { setLoading(false); return }
-    const ck = `kwsov:${campId}:${l}:${t}`
+    const ck = `kwsov:${campId}:${l}:${t}:${o ?? 'all'}`
     const cached = getClientCache<any>(ck)
     if (cached) {
       if (cached.data && cached.data.length > 0) {
@@ -96,7 +97,8 @@ export default function KeywordSovPage() {
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/keywords/sov?campaign_id=${campId}&language=${l}&type=${t}`)
+      const ownershipParam = o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''
+      const res = await fetch(`/api/keywords/sov?campaign_id=${campId}&language=${l}&type=${t}${ownershipParam}`)
       const d = await res.json()
       if (d.data && d.data.length > 0) {
         setData(d.data)
@@ -109,9 +111,9 @@ export default function KeywordSovPage() {
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => {
-    if (activeCampaignId) fetchSOV(activeCampaignId, lang, type)
+    if (activeCampaignId) fetchSOV(activeCampaignId, lang, type, ownershipFilter)
     else { setLoading(false); setData([]); setBrands([]) }
-  }, [activeCampaignId, lang, type, fetchSOV])
+  }, [activeCampaignId, lang, type, ownershipFilter, fetchSOV])
 
   useEffect(() => {
     if (!activeCampaignId) return
@@ -148,7 +150,7 @@ export default function KeywordSovPage() {
       })
       if (res.ok) {
         setEditModal({ open: false, keyword: null })
-        if (activeCampaignId) fetchSOV(activeCampaignId, lang, type)
+        if (activeCampaignId) fetchSOV(activeCampaignId, lang, type, ownershipFilter)
       }
     } catch (e) { console.error(e) }
     finally { setEditSaving(false) }
@@ -257,6 +259,14 @@ export default function KeywordSovPage() {
           <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 4 }}>Type</label>
           <select className="input" style={{ width: 160 }} value={type} onChange={e => setType(e.target.value)}>
             {TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div style={{ minWidth: 130 }}>
+          <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: 4 }}>Ownership</label>
+          <select className="input" style={{ cursor: 'pointer', padding: '6px 12px', minWidth: 130 }} value={ownershipFilter} onChange={e => setOwnershipFilter(e.target.value as 'all' | 'ours' | 'theirs')}>
+            <option value="all">All Videos</option>
+            <option value="ours">Our Videos</option>
+            <option value="theirs">Not Our Videos</option>
           </select>
         </div>
       </div>

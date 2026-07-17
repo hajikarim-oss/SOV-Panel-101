@@ -8,12 +8,13 @@ export async function GET(req: NextRequest) {
   const campaignId = req.nextUrl.searchParams.get('campaign_id')
   const language = req.nextUrl.searchParams.get('language') ?? 'all'
   const type = req.nextUrl.searchParams.get('type') ?? 'all'
+  const isOurs = req.nextUrl.searchParams.get('is_ours')
 
   if (!campaignId) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
   try {
-    const key = cacheKey.keywordsSov(campaignId, language, type)
-    const data = await getCached(key, () => fetchKeywordSov(campaignId!, language, type), CACHE_TTL.keywords_sov)
+    const key = `${cacheKey.keywordsSov(campaignId, language, type)}:${isOurs || 'all'}`
+    const data = await getCached(key, () => fetchKeywordSov(campaignId!, language, type, isOurs), CACHE_TTL.keywords_sov)
     return NextResponse.json(data)
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchKeywordSov(campaignId: string, language: string, type: string) {
+async function fetchKeywordSov(campaignId: string, language: string, type: string, isOurs?: string | null) {
   // Parallel: brand names + keywords
   const [cbRes, btRes, kwQuery] = await Promise.all([
     supabase.from('campaign_brands').select('name').eq('campaign_id', campaignId),
@@ -71,7 +72,7 @@ async function fetchKeywordSov(campaignId: string, language: string, type: strin
   const videoBatchPromises = []
   for (let i = 0; i < allVideoIds.length; i += BATCH) {
     videoBatchPromises.push(
-      supabase.from('videos').select('id, view_count, title, channel_name, tags').in('id', allVideoIds.slice(i, i + BATCH))
+      supabase.from('videos').select('id, view_count, title, channel_name, tags, is_ours').in('id', allVideoIds.slice(i, i + BATCH))
     )
   }
   const videoBatchResults = await Promise.all(videoBatchPromises)
@@ -79,6 +80,14 @@ async function fetchKeywordSov(campaignId: string, language: string, type: strin
   const videoMap = new Map<string, any>()
   for (const result of videoBatchResults) {
     for (const v of (result.data || []) as any[]) videoMap.set(v.id, v)
+  }
+
+  // Filter videos by is_ours if specified
+  if (isOurs) {
+    for (const [id, v] of videoMap) {
+      if (isOurs === 'true' && !v.is_ours) videoMap.delete(id)
+      if (isOurs === 'false' && v.is_ours) videoMap.delete(id)
+    }
   }
 
   // Pre-parse tags for all videos once

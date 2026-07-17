@@ -9,11 +9,12 @@ export const runtime = 'nodejs'
 export async function GET(req: NextRequest) {
   try {
     const cid = req.nextUrl.searchParams.get('campaign_id')
+    const isOurs = req.nextUrl.searchParams.get('is_ours')
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:${cid}`,
-      () => fetchDashboard(cid!),
+      `dashboard:${cid}:${isOurs || 'all'}`,
+      () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )
     return NextResponse.json(data)
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchDashboard(cid: string) {
+async function fetchDashboard(cid: string, isOurs?: string | null) {
   const today = new Date().toISOString().split('T')[0]
   const d1 = new Date(Date.now() - 86400000).toISOString().split('T')[0]
   const d7 = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
@@ -79,7 +80,7 @@ async function fetchDashboard(cid: string) {
   const videoBatchPromises = []
   for (let i = 0; i < allCvVideoIds.length; i += BATCH) {
     videoBatchPromises.push(
-      supabase.from('videos').select('id, view_count, channel_name, tags, title, thumbnail_url, youtube_id, channel_id').in('id', allCvVideoIds.slice(i, i + BATCH))
+      supabase.from('videos').select('id, view_count, channel_name, tags, title, thumbnail_url, youtube_id, channel_id, is_ours').in('id', allCvVideoIds.slice(i, i + BATCH))
     )
   }
   const videoBatchResults = await Promise.all(videoBatchPromises)
@@ -96,6 +97,12 @@ async function fetchDashboard(cid: string) {
     if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
     videoMap.set(v.id, v)
   }
+
+  // Compute "our videos" stats before filtering
+  const ourVideoRows = videoRows.filter(v => v.is_ours)
+  const ourVideoCount = ourVideoRows.length
+  const ourVideoViews = ourVideoRows.reduce((s, v) => s + (v.view_count || 0), 0)
+
   const uniqueChannels = channelFreq.size
 
   let topChannel = null
@@ -195,6 +202,7 @@ async function fetchDashboard(cid: string) {
       dailyViews,
       dailyNewVideos,
       dailyKeywordsAdded: dailyKeywords,
+      ourVideos: { count: ourVideoCount, views: ourVideoViews },
     },
     keywords: enrichedKeywords,
     topVideos,

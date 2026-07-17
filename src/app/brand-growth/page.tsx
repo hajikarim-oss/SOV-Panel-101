@@ -49,10 +49,12 @@ export default function BrandGrowthPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<any[]>([])
   const [hasScrapeData, setHasScrapeData] = useState(false)
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchGrowth = useCallback(async (campId: string, m: 'views' | 'frequency', p: string) => {
+  const fetchGrowth = useCallback(async (campId: string, m: 'views' | 'frequency', p: string, o?: string) => {
     if (!campId) return
-    const cacheKey = `growth:${campId}:${m}:${p}`
+    const ownershipParam = o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''
+    const cacheKey = `growth:${campId}:${m}:${p}:${o ?? 'all'}`
     const cached = getClientCache<any>(cacheKey)
     if (cached) {
       if (cached.data) setData(cached.data)
@@ -62,7 +64,7 @@ export default function BrandGrowthPage() {
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/brands/growth?campaign_id=${campId}&metric=${m}&period=${p}`)
+      const res = await fetch(`/api/brands/growth?campaign_id=${campId}&metric=${m}&period=${p}${ownershipParam}`)
       const d = await res.json()
       if (d.data) setData(d.data)
       setHasScrapeData(d.has_scrape_data ?? false)
@@ -73,9 +75,9 @@ export default function BrandGrowthPage() {
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => {
-    if (activeCampaignId) fetchGrowth(activeCampaignId, metric, period)
+    if (activeCampaignId) fetchGrowth(activeCampaignId, metric, period, ownershipFilter)
     else setLoading(false)
-  }, [activeCampaignId, metric, period, fetchGrowth])
+  }, [activeCampaignId, metric, period, ownershipFilter, fetchGrowth])
 
   const handleExport = () => {
     const headers = 'Brand,Current Value,Previous Value,Growth %,Videos Tracked'
@@ -124,6 +126,18 @@ export default function BrandGrowthPage() {
           <p className="page-subtitle">Velocity tracking and period comparison</p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 130 }}>
+            <select
+              className="input"
+              value={ownershipFilter}
+              onChange={e => setOwnershipFilter(e.target.value as 'all' | 'ours' | 'theirs')}
+              style={{ cursor: 'pointer', padding: '6px 12px', minWidth: 130 }}
+            >
+              <option value="all">All Videos</option>
+              <option value="ours">Our Videos</option>
+              <option value="theirs">Not Our Videos</option>
+            </select>
+          </div>
           <div className="toggle-group">
             {(['24h', '7d', '30d'] as const).map(p => (
               <button key={p} className={`toggle-btn ${period === p ? 'active' : ''}`} onClick={() => setPeriod(p)}>

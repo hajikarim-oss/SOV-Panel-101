@@ -77,10 +77,11 @@ export default function SovTrendPage() {
   const [brands, setBrands] = useState<string[]>([])
   const [hasScrapeData, setHasScrapeData] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchTrend = useCallback(async (campId: string, d: string) => {
+  const fetchTrend = useCallback(async (campId: string, d: string, o?: string) => {
     if (!campId) return
-    const ck = `trend:${campId}:${d}`
+    const ck = `trend:${campId}:${d}:${o ?? 'all'}`
     const cached = getClientCache<any>(ck)
     if (cached) {
       const b: string[] = cached.brands ?? []
@@ -93,7 +94,7 @@ export default function SovTrendPage() {
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/sov-trend?campaign_id=${campId}&days=${d}`)
+      const res = await fetch(`/api/sov-trend?campaign_id=${campId}&days=${d}${o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''}`)
       const json = await res.json()
       const b: string[] = json.brands ?? []
       setBrands(b)
@@ -107,9 +108,9 @@ export default function SovTrendPage() {
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => {
-    if (activeCampaignId) fetchTrend(activeCampaignId, days)
+    if (activeCampaignId) fetchTrend(activeCampaignId, days, ownershipFilter)
     else setLoading(false)
-  }, [activeCampaignId, days, fetchTrend])
+  }, [activeCampaignId, days, ownershipFilter, fetchTrend])
 
   const toggleBrand = (b: string) =>
     setActiveBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
@@ -184,6 +185,13 @@ export default function SovTrendPage() {
           >
             7-Day Avg
           </button>
+          <div style={{ minWidth: 130 }}>
+            <select className="input" value={ownershipFilter} onChange={e => setOwnershipFilter(e.target.value as any)} style={{ cursor: 'pointer', padding: '6px 12px', minWidth: 130 }}>
+              <option value="all">All Videos</option>
+              <option value="ours">Our Videos</option>
+              <option value="theirs">Not Our Videos</option>
+            </select>
+          </div>
         </div>
       </div>
 

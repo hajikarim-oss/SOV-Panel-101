@@ -9,10 +9,11 @@ export async function GET(req: NextRequest) {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const metric = req.nextUrl.searchParams.get('metric') ?? 'views'
     const period = req.nextUrl.searchParams.get('period') ?? '7d'
+    const isOurs = req.nextUrl.searchParams.get('is_ours')
     if (!campaignId) return NextResponse.json({ data: [], period, has_scrape_data: false })
 
-    const key = cacheKey.brandGrowth(campaignId, metric, period)
-    const data = await getCached(key, () => fetchGrowth(campaignId!, metric, period), CACHE_TTL.brand_growth)
+    const key = `${cacheKey.brandGrowth(campaignId, metric, period)}:${isOurs || 'all'}`
+    const data = await getCached(key, () => fetchGrowth(campaignId!, metric, period, isOurs), CACHE_TTL.brand_growth)
     return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchGrowth(campaignId: string, metric: string, period: string) {
+async function fetchGrowth(campaignId: string, metric: string, period: string, isOurs?: string | null) {
   const periodDays = period === '24h' ? 1 : period === '30d' ? 30 : 7
   const periodStart = new Date(Date.now() - periodDays * 86400000).toISOString().split('T')[0]
   const prevStart = new Date(Date.now() - periodDays * 2 * 86400000).toISOString().split('T')[0]
@@ -61,7 +62,7 @@ async function fetchGrowth(campaignId: string, metric: string, period: string) {
   const videoBatchPromises = []
   for (let i = 0; i < allVids.length; i += BATCH) {
     videoBatchPromises.push(
-      supabase.from('videos').select('id, view_count').in('id', allVids.slice(i, i + BATCH))
+      supabase.from('videos').select('id, view_count, is_ours').in('id', allVids.slice(i, i + BATCH))
     )
   }
 
@@ -75,11 +76,24 @@ async function fetchGrowth(campaignId: string, metric: string, period: string) {
 
   // Merge video views
   const videoViews = new Map<string, number>()
+  const videoIsOurs = new Map<string, boolean>()
   for (const result of videoBatchResults) {
-    for (const v of (result.data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
+    for (const v of (result.data || []) as any[]) {
+      videoViews.set(v.id, v.view_count || 0)
+      videoIsOurs.set(v.id, v.is_ours || false)
+    }
   }
+
+  // Filter by is_ours if specified
+  const filteredVids = isOurs === 'true'
+    ? allVids.filter(id => videoIsOurs.get(id) === true)
+    : isOurs === 'false'
+    ? allVids.filter(id => videoIsOurs.get(id) !== true)
+    : allVids
+  const filteredVidSet = new Set(filteredVids)
+
   for (const [, agg] of brandAgg) {
-    for (const vid of agg.videoIds) agg.views += videoViews.get(vid) || 0
+    agg.videoIds.forEach(id => { if (filteredVidSet.has(id)) agg.views += videoViews.get(id) || 0 })
   }
 
   // Build snapshot map in single pass

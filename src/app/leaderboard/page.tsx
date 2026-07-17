@@ -21,6 +21,7 @@ interface VideoRow {
   keyword_count: number
   discovered_at: string
   is_new: boolean
+  is_ours: boolean
   keywords_appeared: string[]
   tags: string[]
   keyword_ranks?: KeywordRank[]
@@ -36,25 +37,6 @@ function fmt(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
   return n.toLocaleString()
-}
-
-function Sparkline({ data }: { data: number[] }) {
-  const max = Math.max(...data)
-  const min = Math.min(...data)
-  const range = max - min || 1
-  const W = 56, H = 22
-  const points = data.map((v, i) =>
-    `${(i / (data.length - 1)) * W},${H - ((v - min) / range) * H}`
-  ).join(' ')
-  const trend = data[data.length - 1] > data[0]
-  return (
-    <svg width={W} height={H} className="sparkline">
-      <polyline points={points} fill="none"
-        stroke={trend ? '#10B981' : '#EF4444'}
-        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-      />
-    </svg>
-  )
 }
 
 function KeywordRankBreakdown({ ranks }: { ranks?: KeywordRank[] }) {
@@ -110,6 +92,7 @@ export default function LeaderboardPage() {
   const [selectedBrand, setSelectedBrand] = useState('')
   const [selectedKeyword, setSelectedKeyword] = useState('')
   const [selectedChannel, setSelectedChannel] = useState('')
+  const [selectedOwnership, setSelectedOwnership] = useState<'all' | 'ours' | 'theirs'>('all')
   const [keywords, setKeywords] = useState<any[]>([])
   const [channels, setChannels] = useState<string[]>([])
 
@@ -121,7 +104,7 @@ export default function LeaderboardPage() {
   const [batchAnalyzing, setBatchAnalyzing] = useState(false)
   const [expandedKeywords, setExpandedKeywords] = useState<Set<string>>(new Set())
 
-  const fetchVideos = useCallback(async (campId: string, t: 'long' | 'short', s: 'views' | 'frequency' | 'rank', p: number, brand = '', kwId = '', qStr = '', channel = '') => {
+  const fetchVideos = useCallback(async (campId: string, t: 'long' | 'short', s: 'views' | 'frequency' | 'rank', p: number, brand = '', kwId = '', qStr = '', channel = '', ownership = 'all') => {
     if (!campId) return
     setLoading(true)
     try {
@@ -130,6 +113,7 @@ export default function LeaderboardPage() {
       if (kwId) url += `&keyword_id=${encodeURIComponent(kwId)}`
       if (channel) url += `&channel_name=${encodeURIComponent(channel)}`
       if (qStr.trim()) url += `&q=${encodeURIComponent(qStr.trim())}`
+      if (ownership !== 'all') url += `&is_ours=${ownership === 'ours' ? 'true' : 'false'}`
       const res = await fetch(url)
       const d = await res.json()
       if (d.data) {
@@ -183,11 +167,25 @@ export default function LeaderboardPage() {
   // Filter-dependent data: refetch when filters change
   useEffect(() => {
     if (activeCampaignId) {
-      fetchVideos(activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel)
+      fetchVideos(activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, selectedOwnership)
     } else {
       setLoading(false)
     }
-  }, [activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, fetchVideos])
+  }, [activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, selectedOwnership, fetchVideos])
+
+  const handleToggleOwnership = async (video: VideoRow) => {
+    const newVal = !video.is_ours
+    setVideos(prev => prev.map(v => v.id === video.id ? { ...v, is_ours: newVal } : v))
+    try {
+      await fetch('/api/videos/ownership', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: video.id, is_ours: newVal, campaign_id: activeCampaignId }),
+      })
+    } catch (e) {
+      setVideos(prev => prev.map(v => v.id === video.id ? { ...v, is_ours: !newVal } : v))
+    }
+  }
 
   const handleUpdateTags = async (youtubeId: string, newTags: string[]) => {
     if (!activeCampaignId) return
@@ -384,14 +382,29 @@ export default function LeaderboardPage() {
           </select>
         </div>
 
+        {/* Ownership Filter */}
+        <div style={{ minWidth: 140 }}>
+          <select
+            className="input"
+            value={selectedOwnership}
+            onChange={e => { setSelectedOwnership(e.target.value as any); setPage(1) }}
+            style={{ cursor: 'pointer', padding: '6px 12px' }}
+          >
+            <option value="all">All Videos</option>
+            <option value="ours">Our Videos</option>
+            <option value="theirs">Not Our Videos</option>
+          </select>
+        </div>
+
         {/* Reset Filters */}
-        {(selectedBrand || selectedKeyword || selectedChannel || search) && (
+        {(selectedBrand || selectedKeyword || selectedChannel || selectedOwnership !== 'all' || search) && (
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => {
               setSelectedBrand('')
               setSelectedKeyword('')
               setSelectedChannel('')
+              setSelectedOwnership('all')
               setSearch('')
               setPage(1)
             }}
@@ -428,16 +441,13 @@ export default function LeaderboardPage() {
                   <th style={{ textAlign: 'right' }}>Views</th>
                   <th style={{ textAlign: 'right' }}>Best Rank</th>
                   <th style={{ textAlign: 'center' }}>Keyword Count</th>
-                  <th>Trend</th>
+                  <th style={{ textAlign: 'center' }}>Our Video</th>
                   <th>Extracted</th>
                 </tr>
               </thead>
               <tbody>
                 {videos.map((video, i) => {
                   const globalRank = (page - 1) * PER_PAGE + i + 1
-                  const sparkData = Array.from({ length: 7 }, (_, j) =>
-                    video.view_count * (0.8 + j * 0.04 + Math.random() * 0.08)
-                  )
                   const isEditing = editingVideoId === video.youtube_id
 
                   return (
@@ -731,7 +741,22 @@ export default function LeaderboardPage() {
                           {video.keyword_count}
                         </span>
                       </td>
-                      <td><Sparkline data={sparkData} /></td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          onClick={() => handleToggleOwnership(video)}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                            border: `1.5px solid ${video.is_ours ? '#10B981' : '#E2E8F0'}`,
+                            background: video.is_ours ? '#ECFDF5' : '#FFFFFF',
+                            color: video.is_ours ? '#059669' : '#94A3B8',
+                            cursor: 'pointer', transition: 'all 0.15s ease',
+                          }}
+                          title={video.is_ours ? 'Mark as not ours' : 'Mark as our video'}
+                        >
+                          {video.is_ours ? 'Yes' : 'No'}
+                        </button>
+                      </td>
                       <td style={{ whiteSpace: 'nowrap', fontSize: 11, color: 'var(--text-muted)' }}>
                         {new Date(video.discovered_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                       </td>

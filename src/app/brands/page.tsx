@@ -37,10 +37,11 @@ export default function BrandIntelligencePage() {
   const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<'views' | 'freq'>('views')
   const [hasData, setHasData] = useState(false)
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (o?: string) => {
     if (!activeCampaignId) return
-    const cached = getClientCache<any>(`brands:${activeCampaignId}`)
+    const cached = getClientCache<any>(`brands:${activeCampaignId}:${o || 'all'}`)
     if (cached) {
       setBrands(cached.data || [])
       setHasData(cached.has_scrape_data || false)
@@ -49,11 +50,12 @@ export default function BrandIntelligencePage() {
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/brands?campaign_id=${activeCampaignId}`)
+      const isOursParam = o === 'ours' ? '&is_ours=true' : o === 'theirs' ? '&is_ours=false' : ''
+      const res = await fetch(`/api/brands?campaign_id=${activeCampaignId}${isOursParam}`)
       const d = await res.json()
       setBrands(d.data || [])
       setHasData(d.has_scrape_data || false)
-      setClientCache(`brands:${activeCampaignId}`, d)
+      setClientCache(`brands:${activeCampaignId}:${o || 'all'}`, d)
     } catch (e) {
       console.error(e)
     } finally {
@@ -62,7 +64,7 @@ export default function BrandIntelligencePage() {
   }, [activeCampaignId])
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => { fetchData(ownershipFilter) }, [fetchData, ownershipFilter])
 
   const sorted = [...brands].sort((a, b) =>
     sortBy === 'views'
@@ -98,6 +100,18 @@ export default function BrandIntelligencePage() {
           <Link href="/control" className="btn btn-blue btn-sm">
             <Award size={13} /> Manage Brands
           </Link>
+          <div style={{ minWidth: 130 }}>
+            <select
+              className="input"
+              style={{ cursor: 'pointer', padding: '6px 12px', minWidth: 130 }}
+              value={ownershipFilter}
+              onChange={(e) => setOwnershipFilter(e.target.value as 'all' | 'ours' | 'theirs')}
+            >
+              <option value="all">All Videos</option>
+              <option value="ours">Our Videos</option>
+              <option value="theirs">Not Our Videos</option>
+            </select>
+          </div>
         </div>
       </div>
 

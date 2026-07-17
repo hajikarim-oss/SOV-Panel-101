@@ -340,6 +340,7 @@ export default function OverviewPage() {
   const [videoSearch, setVideoSearch] = useState('')
   const [rankTab, setRankTab] = useState<'long' | 'short'>('long')
   const [showDemo, setShowDemo] = useState(false)
+  const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
   // ── Local Filter States for Individual Widgets ──
   const [ovTrendFormat, setOvTrendFormat] = useState<'all' | 'long' | 'short'>('all')
@@ -362,10 +363,10 @@ export default function OverviewPage() {
 
   const campaign = campaigns.find(c => c.id === activeCampaignId)
 
-  const fetchAll = useCallback(async (campId: string) => {
+  const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
     if (!campId) return
-    // Check client cache first
-    const cached = getClientCache<any>(`overview:${campId}`)
+    const cacheKey = `overview:${campId}:${isOurs || 'all'}`
+    const cached = getClientCache<any>(cacheKey)
     if (cached) {
       setOverview(cached.overview)
       setKeywords(cached.keywords)
@@ -376,23 +377,23 @@ export default function OverviewPage() {
     }
     setLoading(true)
     try {
-      // Single consolidated endpoint: 1 API call instead of 3
-      const res = await fetch(`/api/dashboard?campaign_id=${campId}`)
+      const isOursParam = isOurs && isOurs !== 'all' ? `&is_ours=${isOurs}` : ''
+      const res = await fetch(`/api/dashboard?campaign_id=${campId}${isOursParam}`)
       const d = await res.json()
       setOverview(d.overview)
       setKeywords(d.keywords ?? [])
       setVideos(d.topVideos ?? [])
       setHasData(!d.overview?.error && d.overview?.totalVideos > 0)
-      setClientCache(`overview:${campId}`, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [] })
+      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [] })
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => {
-    if (activeCampaignId) fetchAll(activeCampaignId)
+    if (activeCampaignId) fetchAll(activeCampaignId, ownershipFilter)
     else if (campaigns.length === 0) setLoading(false)
-  }, [activeCampaignId, campaigns.length, fetchAll])
+  }, [activeCampaignId, campaigns.length, fetchAll, ownershipFilter])
 
   // Extract distinct values for filter selectors
   const distinctLanguages = useMemo(() => {
@@ -758,12 +759,17 @@ export default function OverviewPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="select-filter" value={ownershipFilter} onChange={(e) => setOwnershipFilter(e.target.value as any)}>
+            <option value="all">All Videos</option>
+            <option value="ours">Our Videos</option>
+            <option value="theirs">Not Our Videos</option>
+          </select>
           <div style={{ display: 'flex', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'hidden' }}>
             {(['7', '14', '30'] as const).map(r => (
               <button key={r} onClick={() => setTimeRange(r)} style={{ padding: '6px 12px', fontSize: 11.5, fontWeight: 600, background: timeRange === r ? '#1A73E8' : 'transparent', color: timeRange === r ? '#FFF' : '#64748B', border: 'none', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>{r}d</button>
             ))}
           </div>
-          <button onClick={async () => { setRefreshing(true); await fetchAll(activeCampaignId); setRefreshing(false) }} disabled={refreshing}
+          <button onClick={async () => { setRefreshing(true); await fetchAll(activeCampaignId, ownershipFilter); setRefreshing(false) }} disabled={refreshing}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#FFF', color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
             <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
             {refreshing ? 'Refreshing…' : 'Refresh'}
@@ -912,6 +918,13 @@ export default function OverviewPage() {
                 icon={Activity}
                 color="#EC4899"
                 info="The channel with the highest number of keyword appearances."
+              />
+              <MetricCard
+                label="Our Videos"
+                value={fmt(overview?.ourVideos?.count || 0)}
+                icon={Video}
+                color="#10B981"
+                info="Videos identified as belonging to your brand or campaign."
               />
             </div>
 

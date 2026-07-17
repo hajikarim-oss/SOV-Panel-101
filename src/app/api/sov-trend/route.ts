@@ -8,10 +8,11 @@ export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')
+    const isOurs = req.nextUrl.searchParams.get('is_ours')
     if (!campaignId) return NextResponse.json({ data: [], brands: [], has_scrape_data: false })
 
-    const key = cacheKey.sovTrend(campaignId, 'all', String(days))
-    const data = await getCached(key, () => fetchSovTrend(campaignId!, days), CACHE_TTL.sov_trend)
+    const key = `${cacheKey.sovTrend(campaignId, 'all', String(days))}:${isOurs || 'all'}`
+    const data = await getCached(key, () => fetchSovTrend(campaignId!, days, isOurs), CACHE_TTL.sov_trend)
     return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchSovTrend(campaignId: string, days: number) {
+async function fetchSovTrend(campaignId: string, days: number, isOurs?: string | null) {
   // Parallel: get brand names from campaign_brands AND brand_tags simultaneously
   const [cbRes, btRes] = await Promise.all([
     supabase.from('campaign_brands').select('name').eq('campaign_id', campaignId),
@@ -50,10 +51,28 @@ async function fetchSovTrend(campaignId: string, days: number) {
 
   const allVideoIds = [...videoBrandMap.keys()]
 
-  // Parallel: check snapshots exist AND fetch snapshot data
-  const startDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0]
+  // Fetch is_ours for filtering
+  let filteredVideoIds = allVideoIds
+  if (isOurs && allVideoIds.length > 0) {
+    const BATCH = 500
+    const vidBatchPromises = []
+    for (let i = 0; i < allVideoIds.length; i += BATCH) {
+      vidBatchPromises.push(
+        supabase.from('videos').select('id, is_ours').in('id', allVideoIds.slice(i, i + BATCH))
+      )
+    }
+    const vidBatchResults = await Promise.all(vidBatchPromises)
+    const vidsSet = new Set<string>()
+    for (const r of vidBatchResults) {
+      for (const v of (r.data || []) as any[]) {
+        if (isOurs === 'true' && v.is_ours) vidsSet.add(v.id)
+        if (isOurs === 'false' && !v.is_ours) vidsSet.add(v.id)
+      }
+    }
+    filteredVideoIds = allVideoIds.filter(id => vidsSet.has(id))
+  }
 
-  // Fetch snapshot data (count:'exact',head:true returns null — check data length instead)
+  // Fetch snapshot data
   const startDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0]
 
   const { data: snapshots } = await supabase
@@ -61,7 +80,7 @@ async function fetchSovTrend(campaignId: string, days: number) {
     .select('video_id, view_count, snapshot_date')
     .eq('campaign_id', campaignId)
     .gte('snapshot_date', startDate)
-    .in('video_id', allVideoIds.length > 0 ? allVideoIds : ['__none__'])
+    .in('video_id', filteredVideoIds.length > 0 ? filteredVideoIds : ['__none__'])
 
   const hasSnapshots = (snapshots || []).length > 0
 

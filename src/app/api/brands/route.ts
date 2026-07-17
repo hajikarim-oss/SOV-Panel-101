@@ -7,9 +7,11 @@ export const runtime = 'nodejs'
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
+    const isOurs = req.nextUrl.searchParams.get('is_ours')
     if (!campaignId) return NextResponse.json({ data: [], has_scrape_data: false })
 
-    const data = await getCached(cacheKey.brands(campaignId), () => fetchBrands(campaignId!), CACHE_TTL.brands_overview)
+    const key = `${cacheKey.brands(campaignId)}:${isOurs || 'all'}`
+    const data = await getCached(key, () => fetchBrands(campaignId!, isOurs), CACHE_TTL.brands_overview)
     return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -18,7 +20,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchBrands(campaignId: string) {
+async function fetchBrands(campaignId: string, isOurs?: string | null) {
   // Get brand names from brand_tags (the source of truth)
   const { data: btRows } = await supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', campaignId)
 
@@ -51,7 +53,7 @@ async function fetchBrands(campaignId: string) {
   const videoBatchPromises = []
   for (let i = 0; i < allVideoIds.length; i += BATCH) {
     videoBatchPromises.push(
-      supabase.from('videos').select('id, view_count').in('id', allVideoIds.slice(i, i + BATCH))
+      supabase.from('videos').select('id, view_count, is_ours').in('id', allVideoIds.slice(i, i + BATCH))
     )
   }
   const videoBatchResults = await Promise.all(videoBatchPromises)
@@ -59,9 +61,14 @@ async function fetchBrands(campaignId: string) {
     for (const v of (result.data || []) as any[]) videoViews.set(v.id, v.view_count || 0)
   }
 
-  // Sum views per brand
+  // Sum views per brand (with is_ours filter)
   for (const [, agg] of brandAgg) {
-    for (const vid of agg.videoIds) agg.views += videoViews.get(vid) || 0
+    for (const vid of agg.videoIds) {
+      const vData = videoBatchResults.flatMap(r => r.data || []).find((v: any) => v.id === vid) as any
+      if (isOurs === 'true' && !vData?.is_ours) continue
+      if (isOurs === 'false' && vData?.is_ours) continue
+      agg.views += videoViews.get(vid) || 0
+    }
   }
 
   // Get keyword video counts for frequency SOV

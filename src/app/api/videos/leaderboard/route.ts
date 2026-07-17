@@ -13,11 +13,12 @@ export async function GET(req: NextRequest) {
     const keywordId = req.nextUrl.searchParams.get('keyword_id')
     const channelName = req.nextUrl.searchParams.get('channel_name')
     const search = req.nextUrl.searchParams.get('q')
+    const isOurs = req.nextUrl.searchParams.get('is_ours')
 
     if (!campaignId) return NextResponse.json({ data: [], total: 0, channels: [] })
 
-    const key = cacheKey.leaderboard(campaignId, sort, page, tab)
-    const filters = { brandName, keywordId, channelName, search, tab, sort, page, limit }
+    const key = `${cacheKey.leaderboard(campaignId, sort, page, tab)}:${isOurs || 'all'}`
+    const filters = { brandName, keywordId, channelName, search, tab, sort, page, limit, isOurs }
     const data = await getCached(key, () => fetchLeaderboard(campaignId!, filters), CACHE_TTL.video_leaderboard)
     return NextResponse.json(data)
   } catch (e: any) {
@@ -26,8 +27,8 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function fetchLeaderboard(campaignId: string, filters: { brandName: string | null; keywordId: string | null; channelName: string | null; search: string | null; tab: string; sort: string; page: number; limit: number }) {
-    const { brandName, keywordId, channelName, search, tab, sort, page, limit } = filters
+async function fetchLeaderboard(campaignId: string, filters: { brandName: string | null; keywordId: string | null; channelName: string | null; search: string | null; tab: string; sort: string; page: number; limit: number; isOurs: string | null }) {
+    const { brandName, keywordId, channelName, search, tab, sort, page, limit, isOurs } = filters
     const offset = (page - 1) * limit
     const kvTable = tab === 'short' ? 'keyword_shorts' : 'keyword_videos'
 
@@ -49,7 +50,7 @@ async function fetchLeaderboard(campaignId: string, filters: { brandName: string
     const keywordIds = Array.from(keywordIdSet)
 
     const [{ data: videos }, { data: keywordRows }, { data: brandRows }] = await Promise.all([
-      supabase.from('videos').select('id, youtube_id, title, channel_name, channel_id, tags, view_count, duration, duration_sec, thumbnail_url, published_at').in('id', videoIds),
+      supabase.from('videos').select('id, youtube_id, title, channel_name, channel_id, tags, view_count, duration, duration_sec, thumbnail_url, published_at, is_ours').in('id', videoIds),
       supabase.from('keywords').select('id, text').in('id', keywordIds),
       supabase.from('brand_tags').select('video_id, brand_name').in('video_id', videoIds).eq('campaign_id', campaignId),
     ])
@@ -93,7 +94,7 @@ async function fetchLeaderboard(campaignId: string, filters: { brandName: string
         channel_id: v.channel_id || '', view_count: v.view_count || 0,
         duration: v.duration || '', duration_sec: v.duration_sec || 0,
         thumbnail_url: v.thumbnail_url || '', published_at: v.published_at || '',
-        tags: tagsArr, is_short: tab === 'short',
+        tags: tagsArr, is_short: tab === 'short', is_ours: v.is_ours || false,
         is_new: stats?.discovered_at ? new Date(stats.discovered_at) > new Date(Date.now() - 7 * 86400000) : false,
         best_rank: stats?.best_rank || 0, keyword_count: stats?.keyword_count || 0,
         discovered_at: stats?.discovered_at || '', last_seen_at: stats?.last_seen_at || '',
@@ -105,6 +106,8 @@ async function fetchLeaderboard(campaignId: string, filters: { brandName: string
 
     if (brandName) enriched = enriched.filter(v => v.brands.includes(brandName))
     if (channelName) enriched = enriched.filter(v => v.channel_name === channelName)
+    if (isOurs === 'true') enriched = enriched.filter(v => v.is_ours)
+    if (isOurs === 'false') enriched = enriched.filter(v => !v.is_ours)
     if (search) {
       const q = search.toLowerCase()
       enriched = enriched.filter(v => (v.title || '').toLowerCase().includes(q) || (v.channel_name || '').toLowerCase().includes(q))
