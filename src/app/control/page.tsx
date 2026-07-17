@@ -83,9 +83,9 @@ function fmt(n: number): string {
   return n.toLocaleString()
 }
 
-function Toast({ msg, type, onClose }: { msg: string; type: 'success' | 'error' | 'info'; onClose: () => void }) {
+function Toast({ msg, type, onClose }: { msg: string; type: 'success' | 'error' | 'info' | 'warning'; onClose: () => void }) {
   useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t) }, [onClose])
-  const bg = type === 'success' ? '#00C853' : type === 'error' ? '#FF2D55' : '#1A73E8'
+  const bg = type === 'success' ? '#00C853' : type === 'error' ? '#FF2D55' : type === 'warning' ? '#F59E0B' : '#1A73E8'
   return (
     <div style={{
       position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
@@ -98,6 +98,7 @@ function Toast({ msg, type, onClose }: { msg: string; type: 'success' | 'error' 
       {type === 'success' && <CheckCircle size={16} />}
       {type === 'error' && <XCircle size={16} />}
       {type === 'info' && <Zap size={16} />}
+      {type === 'warning' && <AlertTriangle size={16} />}
       <span style={{ flex: 1 }}>{msg}</span>
       <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#FFF', padding: 2 }}>
         <X size={14} />
@@ -129,7 +130,8 @@ export default function ControlPage() {
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
   const [refreshingViews, setRefreshingViews] = useState(false)
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [viewRefreshProgress, setViewRefreshProgress] = useState('')
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null)
   const [search, setSearch] = useState('')
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -156,7 +158,7 @@ export default function ControlPage() {
   const [newKey, setNewKey] = useState({ label: '', api_key: '', bucket: '1', units_limit: '10000' })
   const [keyVisible, setKeyVisible] = useState(false)
 
-  const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
     setToast({ msg, type })
   }, [])
 
@@ -660,13 +662,31 @@ export default function ControlPage() {
                         className="btn btn-sm"
                         onClick={async () => {
                           setRefreshingViews(true)
+                          setViewRefreshProgress('Starting…')
                           try {
-                            const r = await fetch('/api/cron?job=daily_views')
-                            const d = await r.json()
-                            if (d.ok) showToast(`Views refreshed: ${d.daily_views?.updated || 0} videos updated`, 'success')
-                            else showToast(d.error || 'Refresh failed', 'error')
+                            let offset = 0
+                            const limit = 100
+                            let totalUpdated = 0
+                            let totalProcessed = 0
+                            let chunkNum = 0
+                            while (true) {
+                              chunkNum++
+                              setViewRefreshProgress(`Chunk ${chunkNum}…`)
+                              const r = await fetch(`/api/cron?job=daily_views&offset=${offset}&limit=${limit}`)
+                              const d = await r.json()
+                              if (!d.ok) { showToast(d.error || 'Chunk failed', 'error'); break }
+                              totalUpdated += d.updated || 0
+                              totalProcessed += d.processed || 0
+                              setViewRefreshProgress(`${totalProcessed}/${d.total} (${totalUpdated} updated)`)
+                              if (d.completed || d.remaining <= 0 || d.processed === 0) {
+                                showToast(`Views refreshed: ${totalUpdated} updated across ${totalProcessed} videos (${chunkNum} chunks)`, 'success')
+                                break
+                              }
+                              offset += limit
+                              if (chunkNum >= 200) { showToast(`Stopped at ${chunkNum} chunks. ${d.remaining} remaining.`, 'warning'); break }
+                            }
                           } catch { showToast('Refresh failed', 'error') }
-                          finally { setRefreshingViews(false) }
+                          finally { setRefreshingViews(false); setViewRefreshProgress('') }
                         }}
                         disabled={refreshingViews}
                         style={{
@@ -676,7 +696,7 @@ export default function ControlPage() {
                         }}
                       >
                         {refreshingViews
-                          ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Updating…</>
+                          ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> {viewRefreshProgress || 'Updating…'}</>
                           : <><RefreshCw size={13} /> Refresh Views</>
                         }
                       </button>
