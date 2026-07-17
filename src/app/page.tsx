@@ -415,7 +415,7 @@ export default function OverviewPage() {
   const distinctBrands = useMemo(() => {
     const brands = new Set<string>()
     videos.forEach((v: any) => {
-      ;(v.brands || []).forEach((b: string) => brands.add(b))
+      ;(v.tags || v.brands || []).forEach((b: string) => brands.add(b))
     })
     return Array.from(brands).sort()
   }, [videos])
@@ -478,7 +478,8 @@ export default function OverviewPage() {
     // Accumulate brand-wise metrics on filtered videos
     const brandMap = new Map<string, { views: number; freq: number; videoCount: number }>()
     filteredBrandVideos.forEach((v: any) => {
-      ;(v.brands || []).forEach((b: string) => {
+      const brandList = v.tags || v.brands || []
+      brandList.forEach((b: string) => {
         if (!brandMap.has(b)) brandMap.set(b, { views: 0, freq: 0, videoCount: 0 })
         const m = brandMap.get(b)!
         m.views += v.view_count || 0
@@ -540,7 +541,7 @@ export default function OverviewPage() {
       if (v.is_short) s.shorts++
       s.bestRank = Math.min(s.bestRank, v.best_rank || 99)
       ;(v.keywords_appeared || []).forEach((k: string) => s.kws.add(k))
-      ;(v.brands || []).forEach((b: string) => s.brands.add(b))
+      ;(v.tags || v.brands || []).forEach((b: string) => s.brands.add(b))
     })
 
     const channels = Array.from(creatorChanMap.values())
@@ -577,7 +578,7 @@ export default function OverviewPage() {
     // 4. Rankings & Scatter (respecting rankRangeFilter and rankBrandFilter)
     let filteredRankVideos = videos
     if (rankBrandFilter !== 'all') {
-      filteredRankVideos = filteredRankVideos.filter((v: any) => (v.brands || []).includes(rankBrandFilter))
+      filteredRankVideos = filteredRankVideos.filter((v: any) => (v.tags || v.brands || []).includes(rankBrandFilter))
     }
     if (rankRangeFilter !== 'all') {
       filteredRankVideos = filteredRankVideos.filter((v: any) => {
@@ -1036,8 +1037,8 @@ export default function OverviewPage() {
             {/* Views timeline with individual widget filter and View More button */}
             <Card
               title="Daily performance trends"
-              sub="Views, new videos indexed, and keywords added per day"
-              height={280}
+              sub="Total ranked video views and keyword coverage per day"
+              height={320}
               right={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <select className="select-filter" value={ovTrendFormat} onChange={(e) => setOvTrendFormat(e.target.value as any)}>
@@ -1057,46 +1058,52 @@ export default function OverviewPage() {
                 </div>
               }
             >
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={timeline} margin={{ top: 8, right: 12, left: -10, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                  <YAxis yAxisId="L" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
-                  <YAxis yAxisId="R" orientation="right" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                  <Tooltip
-                    content={({ active, payload, label }: any) => {
-                      if (!active || !payload?.length) return null
-                      const sorted = [...payload].sort((a: any, b: any) => {
-                        const order: Record<string, number> = { 'Views': 0, 'New videos': 1, 'Keywords added': 2 }
-                        return (order[a.name] ?? 9) - (order[b.name] ?? 9)
-                      })
-                      return (
-                        <div style={{ background: '#0F172A', borderRadius: 10, padding: '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', minWidth: 180, border: '1px solid rgba(255,255,255,0.06)' }}>
-                          <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{label}</div>
-                          {sorted.map((p: any, i: number) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: i < sorted.length - 1 ? 5 : 0 }}>
-                              <div style={{ width: 8, height: 8, borderRadius: p.dataKey === 'videos' ? 2 : '50%', background: p.color || p.stroke, flexShrink: 0 }} />
-                              <span style={{ fontSize: 11.5, color: '#CBD5E1', flex: 1 }}>{p.name}</span>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: '#FFF', fontFamily: "'JetBrains Mono', monospace" }}>
-                                {p.dataKey === 'views' ? fmt(p.value) : p.value}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )
-                    }}
-                  />
-                  <Bar yAxisId="R" dataKey="videos" name="New videos" fill="#1A73E8" fillOpacity={0.55} radius={[2, 2, 0, 0]} barSize={6} />
-                  <Area yAxisId="L" type="monotone" dataKey="views" name="Views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv)" dot={false} activeDot={{ r: 4, strokeWidth: 0, fill: '#10B981' }} />
-                  <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 6 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
+              {timeline.length < 2 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
+                  <div style={{ fontSize: 32, fontWeight: 800, color: '#0F172A' }}>{fmt(overview?.totalViewership || 0)}</div>
+                  <div style={{ fontSize: 12, color: '#64748B' }}>Total ranked video views</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>Run the daily views refresh to see trends over time</div>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={timeline} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gv" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="kv" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366F1" stopOpacity={0.15} />
+                        <stop offset="95%" stopColor="#6366F1" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                    <YAxis yAxisId="L" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
+                    <YAxis yAxisId="R" orientation="right" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                    <Tooltip
+                      content={({ active, payload, label }: any) => {
+                        if (!active || !payload?.length) return null
+                        return (
+                          <div style={{ background: '#0F172A', borderRadius: 10, padding: '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', minWidth: 180, border: '1px solid rgba(255,255,255,0.06)' }}>
+                            <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{label}</div>
+                            {payload.map((p: any, i: number) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: i < payload.length - 1 ? 5 : 0 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 4, background: p.color, flexShrink: 0 }} />
+                                <span style={{ fontSize: 11.5, color: '#CBD5E1', flex: 1 }}>{p.name}</span>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: '#FFF', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(p.value)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      }}
+                    />
+                    <Area yAxisId="L" type="monotone" dataKey="views" name="Ranked Views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv)" dot={{ r: 3, fill: '#10B981', strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0, fill: '#10B981' }} />
+                    <Area yAxisId="R" type="monotone" dataKey="keywords" name="Keywords" stroke="#6366F1" strokeWidth={2} fill="url(#kv)" dot={{ r: 3, fill: '#6366F1', strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0, fill: '#6366F1' }} />
+                    <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingTop: 6 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              )}
             </Card>
 
             {/* Summaries list */}
@@ -1135,11 +1142,11 @@ export default function OverviewPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {channels.length === 0 ? (
+                  {channels.filter((c: any) => c.kwCount > 0).length === 0 ? (
                     <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>
                       No creator data yet. Run a keyword scrape to discover videos.
                     </div>
-                  ) : channels.slice(0, 4).map((c, i) => (
+                  ) : channels.filter((c: any) => c.kwCount > 0).sort((a: any, b: any) => b.kwCount - a.kwCount || b.views - a.views).slice(0, 4).map((c, i) => (
                     <div key={c.name} className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 6px', borderRadius: 6 }}>
                       <div style={{ width: 22, height: 22, borderRadius: 6, background: `${C[i % C.length]}12`, fontSize: 10, fontWeight: 800, color: C[i % C.length], display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{i + 1}</div>
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -1161,11 +1168,11 @@ export default function OverviewPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {videos.length === 0 ? (
+                  {videos.filter((v: any) => (v.keywords_appeared || []).length > 0).length === 0 ? (
                     <div style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', padding: '16px 0' }}>
                       No ranked videos yet. Add keywords and run a scrape in Campaign Control.
                     </div>
-                  ) : videos.slice(0, 4).map((v: any) => (
+                  ) : videos.filter((v: any) => (v.keywords_appeared || []).length > 0).sort((a: any, b: any) => (a.best_rank || 99) - (b.best_rank || 99) || (b.view_count || 0) - (a.view_count || 0)).slice(0, 4).map((v: any) => (
                     <a key={v.id} href={`https://youtube.com/watch?v=${v.youtube_id}`} target="_blank" rel="noopener noreferrer"
                       className="row-hover" style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 6px', borderRadius: 6, textDecoration: 'none' }}>
                       <img src={v.thumbnail_url || `https://img.youtube.com/vi/${v.youtube_id}/mqdefault.jpg`} alt="" style={{ width: 40, height: 24, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
@@ -1732,19 +1739,19 @@ export default function OverviewPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={[
                     { tier: 'Top 1-3', ...Object.fromEntries(distinctBrands.slice(0, 4).map((b, i) => {
-                      const count = filteredRankVideos.filter(v => (v.brands || []).includes(b) && (v.best_rank || 20) <= 3).length
+                      const count = filteredRankVideos.filter(v => (v.tags || v.brands || []).includes(b) && (v.best_rank || 20) <= 3).length
                       return [b, count]
                     })) },
                     { tier: 'Top 4-5', ...Object.fromEntries(distinctBrands.slice(0, 4).map((b, i) => {
-                      const count = filteredRankVideos.filter(v => (v.brands || []).includes(b) && (v.best_rank || 20) > 3 && (v.best_rank || 20) <= 5).length
+                      const count = filteredRankVideos.filter(v => (v.tags || v.brands || []).includes(b) && (v.best_rank || 20) > 3 && (v.best_rank || 20) <= 5).length
                       return [b, count]
                     })) },
                     { tier: 'Top 6-10', ...Object.fromEntries(distinctBrands.slice(0, 4).map((b, i) => {
-                      const count = filteredRankVideos.filter(v => (v.brands || []).includes(b) && (v.best_rank || 20) > 5 && (v.best_rank || 20) <= 10).length
+                      const count = filteredRankVideos.filter(v => (v.tags || v.brands || []).includes(b) && (v.best_rank || 20) > 5 && (v.best_rank || 20) <= 10).length
                       return [b, count]
                     })) },
                     { tier: '11-20', ...Object.fromEntries(distinctBrands.slice(0, 4).map((b, i) => {
-                      const count = filteredRankVideos.filter(v => (v.brands || []).includes(b) && (v.best_rank || 20) > 10).length
+                      const count = filteredRankVideos.filter(v => (v.tags || v.brands || []).includes(b) && (v.best_rank || 20) > 10).length
                       return [b, count]
                     })) },
                   ]} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
