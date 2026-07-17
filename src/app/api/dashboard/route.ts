@@ -147,7 +147,8 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
 
   for (const vid of top10VideoIdsPerKw) {
     const v = videoMap.get(vid)
-    if (v) totalViewership += v.view_count || 0
+    if (!v) continue
+    totalViewership += v.view_count || 0
 
     const vidLangs = videoLangMap.get(vid)
     if (vidLangs) {
