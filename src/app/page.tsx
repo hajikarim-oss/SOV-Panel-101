@@ -400,7 +400,11 @@ export default function OverviewPage() {
   const distinctLanguages = useMemo(() => {
     const langs = new Set<string>()
     keywords.forEach((k: any) => { if (k.language) langs.add(k.language) })
-    return Array.from(langs).sort()
+    const result = Array.from(langs).sort()
+    if (typeof window !== 'undefined') {
+      console.log('[DEBUG] keywords count:', keywords.length, 'distinctLanguages:', result, 'sample:', keywords.slice(0, 3).map((k: any) => ({ text: k.text, language: k.language })))
+    }
+    return result
   }, [keywords])
 
   const distinctBrands = useMemo(() => {
