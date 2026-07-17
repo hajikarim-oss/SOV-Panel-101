@@ -341,6 +341,7 @@ export default function OverviewPage() {
   const [rankTab, setRankTab] = useState<'long' | 'short'>('long')
   const [showDemo, setShowDemo] = useState(false)
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
+  const [growthTab, setGrowthTab] = useState<'24h' | '7d' | '30d'>('24h')
 
   // ── Local Filter States for Individual Widgets ──
   const [ovTrendFormat, setOvTrendFormat] = useState<'all' | 'long' | 'short'>('all')
@@ -859,7 +860,7 @@ export default function OverviewPage() {
                 value={fmtIndian(overview?.totalViewership ?? 0)}
                 icon={Eye}
                 color="#10B981"
-                info="Aggregated view count across all discovered videos."
+                info="Aggregated view count from top 10 ranked videos per keyword (deduplicated)."
               />
               <MetricCard
                 label="Top keyword type"
@@ -868,27 +869,33 @@ export default function OverviewPage() {
                 color="#6366F1"
                 info="The keyword category with the highest number of tracked keywords."
               />
-              <MetricCard
-                label="Views Growth (24h)"
-                value={formatGrowth(overview?.growth?.h24)}
-                icon={TrendingUp}
-                color="#94A3B8"
-                info="Percentage change in total viewership over the last 24 hours."
-              />
-              <MetricCard
-                label="Views Growth (7d)"
-                value={formatGrowth(overview?.growth?.d7)}
-                icon={TrendingUp}
-                color="#94A3B8"
-                info="Percentage change in total viewership over the last 7 days."
-              />
-              <MetricCard
-                label="Views Growth (30d)"
-                value={formatGrowth(overview?.growth?.d30)}
-                icon={TrendingUp}
-                color="#94A3B8"
-                info="Percentage change in total viewership over the last 30 days."
-              />
+              {/* Views Growth — single card with tab selector */}
+              <div style={{
+                background: '#fff', borderRadius: 12, padding: '14px 16px', border: '1px solid #F1F5F9',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 110,
+                transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <TrendingUp size={14} style={{ color: '#94A3B8' }} />
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Views Growth
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>
+                    {growthTab === '24h' ? formatGrowth(overview?.growth?.h24) : growthTab === '7d' ? formatGrowth(overview?.growth?.d7) : formatGrowth(overview?.growth?.d30)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 0, background: '#F1F5F9', borderRadius: 6, overflow: 'hidden' }}>
+                  {(['24h', '7d', '30d'] as const).map(tab => (
+                    <button key={tab} onClick={() => setGrowthTab(tab)} style={{
+                      flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 700, border: 'none', cursor: 'pointer',
+                      background: growthTab === tab ? '#fff' : 'transparent', color: growthTab === tab ? '#0F172A' : '#94A3B8',
+                      boxShadow: growthTab === tab ? '0 1px 3px rgba(0,0,0,0.08)' : 'none', transition: 'all 0.15s',
+                    }}>{tab}</button>
+                  ))}
+                </div>
+              </div>
               <MetricCard
                 label="New Videos (7d)"
                 value={fmt(overview?.newVideosLast7Days ?? 0)}
@@ -1037,6 +1044,7 @@ export default function OverviewPage() {
                     <option value="short">Shorts</option>
                   </select>
                   <select className="select-filter" value={ovTrendDays} onChange={(e) => setOvTrendDays(Number(e.target.value))}>
+                    <option value={2}>Last 48 hours</option>
                     <option value={7}>Last 7 days</option>
                     <option value={14}>Last 14 days</option>
                     <option value={30}>Last 30 days</option>

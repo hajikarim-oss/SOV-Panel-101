@@ -89,13 +89,39 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     videoRows.push(...(result.data || []))
   }
 
-  let totalViewership = 0
-  const channelFreq = new Map<string, number>()
+  // Build a map for quick video lookup
   const videoMap = new Map<string, any>()
   for (const v of videoRows) {
-    totalViewership += v.view_count || 0
-    if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
     videoMap.set(v.id, v)
+  }
+
+  // Total Viewership: top 10 ranked videos per keyword (deduplicated)
+  const top10VideoIdsPerKw = new Set<string>()
+  const kvByKw = new Map<string, typeof kvRes.data extends (infer T)[] | null ? T[] : never>()
+  const ksByKw = new Map<string, typeof ksRes.data extends (infer T)[] | null ? T[] : never>()
+  for (const kv of (kvRes.data || [])) {
+    if (!kvByKw.has(kv.keyword_id)) kvByKw.set(kv.keyword_id, [])
+    kvByKw.get(kv.keyword_id)!.push(kv)
+  }
+  for (const ks of (ksRes.data || [])) {
+    if (!ksByKw.has(ks.keyword_id)) ksByKw.set(ks.keyword_id, [])
+    ksByKw.get(ks.keyword_id)!.push(ks)
+  }
+  for (const kw of keywords) {
+    const kvs = (kvByKw.get(kw.id) || []).sort((a: any, b: any) => a.rank - b.rank).slice(0, 10)
+    const kss = (ksByKw.get(kw.id) || []).sort((a: any, b: any) => a.rank - b.rank).slice(0, 10)
+    for (const kv of kvs) top10VideoIdsPerKw.add(kv.video_id)
+    for (const ks of kss) top10VideoIdsPerKw.add(ks.video_id)
+  }
+
+  let totalViewership = 0
+  const channelFreq = new Map<string, number>()
+  for (const v of videoRows) {
+    if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
+  }
+  for (const vid of top10VideoIdsPerKw) {
+    const v = videoMap.get(vid)
+    if (v) totalViewership += v.view_count || 0
   }
 
   // Compute "our videos" stats before filtering
@@ -150,6 +176,26 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   ])
 
   // ── Top 200 videos for leaderboard (sorted by views) ──
+  // Build video→keywords mapping for regional language detection
+  const kwTextMap = new Map<string, string>()
+  for (const kw of keywords) { kwTextMap.set(kw.id, kw.text) }
+  const videoKeywordsMap = new Map<string, string[]>()
+  for (const kv of (kvRes.data || [])) {
+    const kwText = kwTextMap.get(kv.keyword_id)
+    if (kwText) {
+      if (!videoKeywordsMap.has(kv.video_id)) videoKeywordsMap.set(kv.video_id, [])
+      videoKeywordsMap.get(kv.video_id)!.push(kwText)
+    }
+  }
+  for (const ks of (ksRes.data || [])) {
+    const kwText = kwTextMap.get(ks.keyword_id)
+    if (kwText) {
+      if (!videoKeywordsMap.has(ks.video_id)) videoKeywordsMap.set(ks.video_id, [])
+      const arr = videoKeywordsMap.get(ks.video_id)!
+      if (!arr.includes(kwText)) arr.push(kwText)
+    }
+  }
+
   const topVideos = videoRows
     .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0))
     .slice(0, 200)
@@ -160,6 +206,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
       return {
         ...v,
         tags,
+        keywords_appeared: videoKeywordsMap.get(v.id) || [],
         rank: kv?.rank ?? ks?.rank ?? null,
         keyword_id: kv?.keyword_id ?? ks?.keyword_id ?? null,
       }

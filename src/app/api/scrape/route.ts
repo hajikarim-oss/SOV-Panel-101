@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
           const result = await scrapeKeyword(campaign_id, kw.id, kw.text)
           await queryAll(
             `UPDATE scrape_jobs SET status = 'completed', results_count = $1, completed_at = $2 WHERE id = $3`,
-            [result.saved, new Date().toISOString(), jobId]
+            [result.ranked, new Date().toISOString(), jobId]
           )
           syncResults.push({ keyword: kw.text, result })
           jobs.push({ id: jobId, keyword: kw.text, mode: 'sync' })
