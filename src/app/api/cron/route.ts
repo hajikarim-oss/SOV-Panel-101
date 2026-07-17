@@ -16,7 +16,6 @@ export async function POST(req: NextRequest) {
 async function handleCron(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret') ?? req.headers.get('x-vercel-cron-secret')
   const expected = process.env.CRON_SECRET
-  // If no CRON_SECRET is configured, allow unauthenticated calls (Vercel cron handles its own auth)
   if (expected && secret !== expected) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

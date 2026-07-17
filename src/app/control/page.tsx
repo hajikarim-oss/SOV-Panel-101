@@ -128,6 +128,7 @@ export default function ControlPage() {
   const [users, setUsers] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [scraping, setScraping] = useState(false)
+  const [refreshingViews, setRefreshingViews] = useState(false)
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [search, setSearch] = useState('')
   const pollRef = useRef<NodeJS.Timeout | null>(null)
@@ -653,6 +654,30 @@ export default function ControlPage() {
                         {scraping
                           ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Scraping…</>
                           : <><Play size={13} /> Scrape All</>
+                        }
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          setRefreshingViews(true)
+                          try {
+                            const r = await fetch('/api/cron?job=daily_views')
+                            const d = await r.json()
+                            if (d.ok) showToast(`Views refreshed: ${d.daily_views?.updated || 0} videos updated`, 'success')
+                            else showToast(d.error || 'Refresh failed', 'error')
+                          } catch { showToast('Refresh failed', 'error') }
+                          finally { setRefreshingViews(false) }
+                        }}
+                        disabled={refreshingViews}
+                        style={{
+                          background: refreshingViews ? '#F1F5F9' : 'rgba(0,200,83,0.08)',
+                          border: `1px solid ${refreshingViews ? '#E2E8F0' : 'rgba(0,200,83,0.25)'}`,
+                          color: '#059669', fontWeight: 700,
+                        }}
+                      >
+                        {refreshingViews
+                          ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Updating…</>
+                          : <><RefreshCw size={13} /> Refresh Views</>
                         }
                       </button>
                     </div>
