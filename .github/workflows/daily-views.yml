@@ -1,0 +1,71 @@
+name: Daily Views Update
+
+on:
+  schedule:
+    # Every day at 8:00 AM UTC
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'Job type'
+        required: true
+        default: 'daily_views'
+        type: choice
+        options:
+          - daily_views
+          - weekly_refresh
+
+env:
+  SITE_URL: ${{ secrets.SITE_URL || 'https://sov-panel-101.vercel.app' }}
+
+jobs:
+  run-cron:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger cron endpoint
+        run: |
+          JOB_TYPE="${{ github.event.inputs.job || 'daily_views' }}"
+          echo "Triggering $JOB_TYPE on $SITE_URL"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "x-vercel-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "$SITE_URL/api/cron?job=$JOB_TYPE")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: Cron failed with status $HTTP_CODE"
+            exit 1
+          fi
+          
+          echo "Cron triggered successfully"
+
+  # Weekly refresh runs every Monday at 6 AM UTC
+  weekly-refresh:
+    if: github.event_name == 'schedule' || github.event.inputs.job == 'weekly_refresh'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Trigger weekly refresh
+        run: |
+          echo "Triggering weekly_refresh on $SITE_URL"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -H "x-vercel-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            "$SITE_URL/api/cron?job=weekly_refresh")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+          
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+          
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: Weekly refresh failed with status $HTTP_CODE"
+            exit 1
+          fi
