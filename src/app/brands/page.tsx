@@ -66,12 +66,6 @@ export default function BrandIntelligencePage() {
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => { fetchData(ownershipFilter) }, [fetchData, ownershipFilter])
 
-  const sorted = [...brands].sort((a, b) =>
-    sortBy === 'views'
-      ? (b.total_views || 0) - (b.total_views || 0) - ((a.total_views || 0) - (a.total_views || 0))
-      : (b.total_frequency || 0) - (a.total_frequency || 0)
-  )
-  // Fix: proper sort
   const sortedBrands = [...brands].sort((a, b) =>
     sortBy === 'views' ? (b.total_views || 0) - (a.total_views || 0) : (b.total_frequency || 0) - (a.total_frequency || 0)
   )

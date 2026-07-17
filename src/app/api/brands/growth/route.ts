@@ -114,26 +114,38 @@ async function fetchGrowth(campaignId: string, metric: string, period: string, i
     .sort((a, b) => metric === 'views' ? b.current_views - a.current_views : b.video_count - a.video_count)
 
   const enriched = sortedBrands.map((b, currentRank) => {
+    // Find all available snapshot dates for this brand (sorted ascending)
+    const availableDates: string[] = []
+    for (const [date, bm] of snapByDateBrand) {
+      if (bm.has(b.brand_name)) availableDates.push(date)
+    }
+    availableDates.sort()
+
+    // Compare latest snapshot vs earliest snapshot (or previous period)
     let recentVal = 0, previousVal = 0
-    for (let i = 0; i < periodDays; i++) {
-      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0]
-      recentVal += snapByDateBrand.get(d)?.get(b.brand_name) || 0
+    if (availableDates.length >= 2) {
+      // Latest date value
+      const latestDate = availableDates[availableDates.length - 1]
+      recentVal = snapByDateBrand.get(latestDate)?.get(b.brand_name) || 0
+      // Previous date value
+      const prevDate = availableDates[availableDates.length - 2]
+      previousVal = snapByDateBrand.get(prevDate)?.get(b.brand_name) || 0
+    } else if (availableDates.length === 1) {
+      // Only one snapshot — compare with current videos.view_count
+      recentVal = b.current_views
+      previousVal = 0
     }
-    for (let i = periodDays; i < periodDays * 2; i++) {
-      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0]
-      previousVal += snapByDateBrand.get(d)?.get(b.brand_name) || 0
-    }
-    const growthPercent = previousVal > 0 ? parseFloat((((recentVal - previousVal) / previousVal) * 100).toFixed(1)) : 0
-    const sparklineData: number[] = []
-    for (let i = periodDays - 1; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86400000).toISOString().split('T')[0]
-      sparklineData.push(snapByDateBrand.get(d)?.get(b.brand_name) || 0)
-    }
+
+    const growthPercent = previousVal > 0 ? parseFloat((((recentVal - previousVal) / previousVal) * 100).toFixed(1)) : (recentVal > 0 ? 100 : 0)
+
+    // Sparkline from all available dates
+    const sparklineData: number[] = availableDates.map(d => snapByDateBrand.get(d)?.get(b.brand_name) || 0)
+
     return {
       brand_name: b.brand_name,
       currentValue: metric === 'views' ? b.current_views : b.video_count,
       previousValue: previousVal, growthPercent, rankMovement: 0, currentRank: currentRank + 1,
-      sparklineData, video_count: b.video_count, has_data: true,
+      sparklineData, video_count: b.video_count, has_data: availableDates.length > 0,
     }
   })
 

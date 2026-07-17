@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:v4:${cid}:${isOurs || 'all'}`,
+      `dashboard:v5:${cid}:${isOurs || 'all'}`,
       () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )
@@ -72,6 +72,9 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   const vs7d = sumRows(vs7dRes.data)
   const vs30d = sumRows(vs30dRes.data)
 
+  // Use the latest available snapshot total for viewership (not raw videos.view_count which sums all video lifetime views)
+  const latestSnapshotTotal = vsToday || vs1d || vs7d || vs30d
+
   const taggedIds = new Set(brandTags.map((bt: any) => bt.video_id))
   const untaggedVideos = allCvVideoIds.filter(id => !taggedIds.has(id)).length
 
@@ -114,11 +117,10 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     for (const ks of kss) top10VideoIdsPerKw.add(ks.video_id)
   }
 
-  // Total Viewership: sum of ALL campaign video views (all 821 videos)
-  let totalViewership = 0
+  // Total Viewership: from view_snapshots (tracked daily data, NOT raw videos.view_count which is YouTube lifetime)
+  let totalViewership = latestSnapshotTotal
   const channelFreq = new Map<string, number>()
   for (const v of videoRows) {
-    totalViewership += v.view_count || 0
     if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
   }
 

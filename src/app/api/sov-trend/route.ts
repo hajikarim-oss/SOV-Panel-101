@@ -106,19 +106,22 @@ async function fetchSovTrend(campaignId: string, days: number, isOurs?: string |
     dates.push(d.toISOString().split('T')[0])
   }
 
-  const trendData = dates.map(date => {
-    const row: Record<string, string | number> = {
-      date: new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', day: '2-digit' }),
-    }
-    const brandMap = dateBrandViews.get(date)
-    let total = 0
-    if (brandMap) { for (const views of brandMap.values()) total += views }
-    for (const brandName of brandNames) {
-      const views = brandMap?.get(brandName) || 0
-      row[brandName] = total > 0 ? Math.round((views / total) * 1000) / 10 : 0
-    }
-    return row
-  })
+  const trendData = dates
+    .map((date, idx) => {
+      const row: Record<string, string | number> = {
+        date: new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', day: '2-digit' }),
+      }
+      const brandMap = dateBrandViews.get(date)
+      let total = 0
+      if (brandMap) { for (const views of brandMap.values()) total += views }
+      for (const brandName of brandNames) {
+        const views = brandMap?.get(brandName) || 0
+        row[brandName] = total > 0 ? Math.round((views / total) * 1000) / 10 : 0
+      }
+      return { row, hasData: total > 0, idx }
+    })
+    .filter(({ hasData, idx }) => hasData || idx === dates.length - 1)
+    .map(({ row }) => row)
 
   return { data: trendData, brands: brandNames, has_scrape_data: hasSnapshots }
 }
