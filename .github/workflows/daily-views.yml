@@ -2,7 +2,6 @@ name: Daily Views Update
 
 on:
   schedule:
-    # Every day at 8:00 AM UTC
     - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
@@ -14,6 +13,16 @@ on:
         options:
           - daily_views
           - weekly_refresh
+          - refresh_views
+      campaign_id:
+        description: 'Campaign ID (optional, leave empty for all)'
+        required: false
+        type: string
+      chunk_size:
+        description: 'Videos per chunk (100-200)'
+        required: false
+        default: '100'
+        type: string
 
 env:
   SITE_URL: ${{ secrets.SITE_URL || 'https://sov-panel-101.vercel.app' }}
@@ -21,51 +30,117 @@ env:
 jobs:
   run-cron:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - name: Trigger cron endpoint
+      - name: Trigger daily views (chunked loop)
+        if: ${{ github.event.inputs.job == 'daily_views' || github.event.inputs.job == '' || github.event.inputs.job == 'auto' }}
         run: |
           JOB_TYPE="${{ github.event.inputs.job || 'daily_views' }}"
-          echo "Triggering $JOB_TYPE on $SITE_URL"
-          
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "x-vercel-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            "$SITE_URL/api/cron?job=$JOB_TYPE")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
-          
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
-          
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "ERROR: Cron failed with status $HTTP_CODE"
-            exit 1
+          CHUNK_SIZE="${{ github.event.inputs.chunk_size || '100' }}"
+          CAMPAIGN="${{ github.event.inputs.campaign_id }}"
+          AUTH_PARAM=""
+          if [ -n "${{ secrets.CRON_SECRET }}" ]; then
+            AUTH_PARAM="&secret=${{ secrets.CRON_SECRET }}"
           fi
-          
-          echo "Cron triggered successfully"
+          CAMPAIGN_PARAM=""
+          if [ -n "$CAMPAIGN" ]; then
+            CAMPAIGN_PARAM="&campaign_id=$CAMPAIGN"
+          fi
 
-  # Weekly refresh runs every Monday at 6 AM UTC
-  weekly-refresh:
-    if: github.event_name == 'schedule' || github.event.inputs.job == 'weekly_refresh'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
+          echo "=== Starting $JOB_TYPE (chunk_size=$CHUNK_SIZE) ==="
+          OFFSET=0
+          TOTAL_PROCESSED=0
+          TOTAL_UPDATED=0
+          CHUNK_NUM=0
+
+          while true; do
+            CHUNK_NUM=$((CHUNK_NUM + 1))
+            echo "--- Chunk $CHUNK_NUM: offset=$OFFSET ---"
+
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              "$SITE_URL/api/cron?job=$JOB_TYPE&offset=$OFFSET&limit=$CHUNK_SIZE$CAMPAIGN_PARAM$AUTH_PARAM")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "ERROR: HTTP $HTTP_CODE at offset $OFFSET"
+              echo "$BODY"
+              # Try to resume from next offset on transient errors
+              if [ "$HTTP_CODE" = "502" ] || [ "$HTTP_CODE" = "504" ]; then
+                echo "Transient error, retrying in 5s..."
+                sleep 5
+                OFFSET=$((OFFSET + CHUNK_SIZE))
+                continue
+              fi
+              exit 1
+            fi
+
+            REMAINING=$(echo "$BODY" | jq -r '.remaining // 0')
+            UPDATED=$(echo "$BODY" | jq -r '.updated // 0')
+            PROCESSED=$(echo "$BODY" | jq -r '.processed // 0')
+            TOTAL=$(echo "$BODY" | jq -r '.total // 0')
+            COMPLETED=$(echo "$BODY" | jq -r '.completed // false')
+
+            TOTAL_PROCESSED=$((TOTAL_PROCESSED + PROCESSED))
+            TOTAL_UPDATED=$((TOTAL_UPDATED + UPDATED))
+
+            echo "  processed=$PROCESSED updated=$UPDATED remaining=$REMAINING total=$TOTAL"
+
+            if [ "$COMPLETED" = "true" ] || [ "$REMAINING" = "0" ] || [ "$REMAINING" = "null" ] || [ "$PROCESSED" = "0" ]; then
+              echo ""
+              echo "=== ALL DONE ==="
+              echo "  Total processed: $TOTAL_PROCESSED"
+              echo "  Total updated: $TOTAL_UPDATED"
+              echo "  Total videos: $TOTAL"
+              break
+            fi
+
+            OFFSET=$((OFFSET + CHUNK_SIZE))
+
+            # Safety: max 200 chunks (20k videos)
+            if [ $CHUNK_NUM -ge 200 ]; then
+              echo "WARNING: Hit 200 chunk limit. Remaining: $REMAINING"
+              break
+            fi
+
+            # Small delay between chunks to avoid hammering the API
+            sleep 1
+          done
+
       - name: Trigger weekly refresh
+        if: ${{ github.event.inputs.job == 'weekly_refresh' }}
         run: |
-          echo "Triggering weekly_refresh on $SITE_URL"
-          
+          AUTH_PARAM=""
+          if [ -n "${{ secrets.CRON_SECRET }}" ]; then
+            AUTH_PARAM="&secret=${{ secrets.CRON_SECRET }}"
+          fi
+
+          echo "=== Starting weekly refresh ==="
           RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "x-vercel-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            "$SITE_URL/api/cron?job=weekly_refresh")
-          
+            "$SITE_URL/api/cron?job=weekly_refresh$AUTH_PARAM")
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | head -n -1)
-          
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
-          
+          echo "HTTP: $HTTP_CODE"
+          echo "$BODY"
+
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "ERROR: Weekly refresh failed with status $HTTP_CODE"
+            echo "ERROR: Weekly refresh failed"
             exit 1
           fi
+
+      - name: Refresh materialized views
+        if: ${{ github.event.inputs.job == 'refresh_views' }}
+        run: |
+          AUTH_PARAM=""
+          if [ -n "${{ secrets.CRON_SECRET }}" ]; then
+            AUTH_PARAM="&secret=${{ secrets.CRON_SECRET }}"
+          fi
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "$SITE_URL/api/cron?job=refresh_views$AUTH_PARAM")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "HTTP: $HTTP_CODE"
+          echo "$(echo "$RESPONSE" | head -n -1)"
