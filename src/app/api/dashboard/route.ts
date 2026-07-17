@@ -291,6 +291,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     campaignBrands: (cbRes.data || []).map((b: any) => b.name),
     regionalStats: Object.fromEntries(langViewsMap.entries()),
     regionalVideoCounts: Object.fromEntries(langVideoCountMap.entries()),
+    totalRegionalViews: Array.from(langViewsMap.values()).reduce((s, v) => s + v, 0),
   }
 }
 

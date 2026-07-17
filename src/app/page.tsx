@@ -333,6 +333,7 @@ export default function OverviewPage() {
   const [videos, setVideos] = useState<any[]>([])
   const [regionalApiStats, setRegionalApiStats] = useState<Record<string, number>>({})
   const [regionalApiCounts, setRegionalApiCounts] = useState<Record<string, number>>({})
+  const [totalRegionalViews, setTotalRegionalViews] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [hasData, setHasData] = useState(false)
@@ -376,6 +377,7 @@ export default function OverviewPage() {
       setVideos(cached.videos)
       setRegionalApiStats(cached.regionalStats || {})
       setRegionalApiCounts(cached.regionalCounts || {})
+      setTotalRegionalViews(cached.totalRegionalViews || 0)
       setHasData(!cached.overview.error && cached.overview.totalVideos > 0)
       setLoading(false)
       return
@@ -390,8 +392,9 @@ export default function OverviewPage() {
       setVideos(d.topVideos ?? [])
       setRegionalApiStats(d.regionalStats || {})
       setRegionalApiCounts(d.regionalVideoCounts || {})
+      setTotalRegionalViews(d.totalRegionalViews || 0)
       setHasData(!d.overview?.error && d.overview?.totalVideos > 0)
-      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [], regionalStats: d.regionalStats || {}, regionalCounts: d.regionalVideoCounts || {} })
+      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [], regionalStats: d.regionalStats || {}, regionalCounts: d.regionalVideoCounts || {}, totalRegionalViews: d.totalRegionalViews || 0 })
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
@@ -654,8 +657,9 @@ export default function OverviewPage() {
     })
     const topCategory = maxType.charAt(0).toUpperCase() + maxType.slice(1)
 
-    // 5. Geographic regional stats from API (computed from same top-10-per-keyword set as totalViewership)
-    const sovDenominator = overview?.totalViewership || 0
+    // 5. Geographic regional stats from API
+    // SOV denominator = sum of all language-level views (includes overlap for multi-language videos)
+    const sovDenominator = totalRegionalViews || 0
     const regionalData = languageRegions.map((region) => {
       const isRegionActive = distinctLanguages.includes(region.langCode)
       const rViews = regionalApiStats[region.langCode] || 0
@@ -691,7 +695,7 @@ export default function OverviewPage() {
       coverageRate, untaggedRatio,
       filteredBrandVideos, filteredRankVideos, regionalData, topCategory
     }
-  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo, regionalApiStats, regionalApiCounts])
+  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo, regionalApiStats, regionalApiCounts, totalRegionalViews])
 
   const {
     isDemo,
