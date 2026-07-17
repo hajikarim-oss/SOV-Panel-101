@@ -326,8 +326,8 @@ async function getDailyData(
 }
 
 // view_snapshots stores CUMULATIVE view_count per video per day
-// daily views = for each video, diff consecutive day view_counts, then sum all deltas
-// Only counts views from top-10-per-keyword ranked videos
+// Returns total views per day (filtered to top-10 ranked videos)
+// The client chart shows the growth trend of these cumulative totals
 async function getDailyViewDeltas(
   campaignId: string | null,
   top10VideoIds: Set<string>,
@@ -339,38 +339,17 @@ async function getDailyViewDeltas(
   const { data } = await q
   if (!data || data.length === 0) return []
 
-  // Group snapshots by video_id → { date → view_count }
-  const videoSnapshots = new Map<string, Map<string, number>>()
+  // Sum view_counts per day for top-10 videos only
+  const dayTotals = new Map<string, number>()
   for (const row of data as any[]) {
     if (!top10VideoIds.has(row.video_id)) continue
     const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
-    if (!videoSnapshots.has(row.video_id)) videoSnapshots.set(row.video_id, new Map())
-    videoSnapshots.get(row.video_id)!.set(dateStr, row.view_count || 0)
+    dayTotals.set(dateStr, (dayTotals.get(dateStr) || 0) + (row.view_count || 0))
   }
 
-  // Collect all dates across all videos
-  const allDates = new Set<string>()
-  for (const snaps of videoSnapshots.values()) {
-    for (const d of snaps.keys()) allDates.add(d)
-  }
-  const sortedDates = Array.from(allDates).sort()
-  if (sortedDates.length <= 1) return []
-
-  // For each date (skip first), sum per-video deltas
-  const result: { date: string; views: number }[] = []
-  for (let i = 1; i < sortedDates.length; i++) {
-    const prevDate = sortedDates[i - 1]
-    const currDate = sortedDates[i]
-    let totalDelta = 0
-    for (const snaps of videoSnapshots.values()) {
-      const prev = snaps.get(prevDate) || 0
-      const curr = snaps.get(currDate) || 0
-      if (curr > prev) totalDelta += curr - prev
-    }
-    result.push({ date: currDate, views: totalDelta })
-  }
-
-  return result
+  return Array.from(dayTotals.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, views]) => ({ date, views }))
 }
 
 function pctChange(now: number, prev: number) {
