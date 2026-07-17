@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { refreshMaterializedViews, setSystemMetadata, getSystemMetadata } from '@/lib/migrations'
 import { getViewCountsOAuth } from '@/lib/youtube-oauth'
+import { verifyToken } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -16,8 +17,14 @@ export async function POST(req: NextRequest) {
 async function handleCron(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret') ?? req.headers.get('x-vercel-cron-secret')
   const expected = process.env.CRON_SECRET
-  if (expected && secret !== expected) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const secretMatch = expected && secret === expected
+
+  if (!secretMatch) {
+    const token = req.cookies.get('sov_session')?.value
+    const session = token ? await verifyToken(token) : null
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
   }
 
   const job = req.nextUrl.searchParams.get('job') ?? 'daily_views'
