@@ -122,13 +122,14 @@ function MetricCard({
 function buildTimeline(totalViews: number, days: number, format: 'all' | 'long' | 'short' = 'all') {
   const base = totalViews > 0 ? totalViews / days : 0
   const formatMultiplier = format === 'all' ? 1 : format === 'long' ? 0.75 : 0.25
-  const result: { date: string; views: number; videos: number; keywords: number; dayOfWeek: number }[] = []
+  const result: { date: string; rawDate: string; views: number; videos: number; keywords: number; dayOfWeek: number }[] = []
 
   let trend = 1.0
   for (let idx = 0; idx <= days; idx++) {
     const i = days - idx
     const date = new Date(Date.now() - i * 86400000)
     const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const rawDate = date.toISOString().slice(0, 10)
     const dayOfWeek = date.getDay()
 
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
@@ -143,7 +144,7 @@ function buildTimeline(totalViews: number, days: number, format: 'all' | 'long' 
       : Math.max(1, Math.floor(Math.random() * 5) + 1)
     const keywordsAdded = i === days ? 0 : Math.max(0, Math.round(Math.random() * 4 * weekdayMultiplier))
 
-    result.push({ date: label, views: finalViews, videos: dailyVideos, keywords: keywordsAdded, dayOfWeek })
+    result.push({ date: label, rawDate, views: finalViews, videos: dailyVideos, keywords: keywordsAdded, dayOfWeek })
   }
   return result
 }
@@ -217,12 +218,13 @@ const DEMO_SCATTER = [
 ]
 function buildDemoTimeline(days: number) {
   const baseViews = 15_100_000
-  const result: { date: string; views: number; videos: number; keywords: number }[] = []
+  const result: { date: string; rawDate: string; views: number; videos: number; keywords: number }[] = []
   let trend = 1.0
   for (let idx = 0; idx <= days; idx++) {
     const i = days - idx
     const date = new Date(Date.now() - i * 86400000)
     const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const rawDate = date.toISOString().slice(0, 10)
     const isWeekend = date.getDay() === 0 || date.getDay() === 6
     const weekdayMult = isWeekend ? 0.72 : 1.08
     trend += (Math.random() - 0.47) * 0.05
@@ -230,7 +232,7 @@ function buildDemoTimeline(days: number) {
     const views = Math.round(baseViews * (0.85 + Math.random() * 0.3) * weekdayMult * trend)
     const dailyVideos = Math.max(50, Math.round(views / 18000 * (0.8 + Math.random() * 0.4)))
     const keywordsAdded = i === days ? 0 : Math.max(0, Math.round(3 * weekdayMult + Math.random() * 4))
-    result.push({ date: label, views, videos: dailyVideos, keywords: keywordsAdded })
+    result.push({ date: label, rawDate, views, videos: dailyVideos, keywords: keywordsAdded })
   }
   return result
 }
@@ -349,6 +351,10 @@ export default function OverviewPage() {
   // ── Local Filter States for Individual Widgets ──
   const [ovTrendFormat, setOvTrendFormat] = useState<'all' | 'long' | 'short'>('all')
   const [ovTrendDays, setOvTrendDays] = useState<number>(14)
+  const [chartTimeRange, setChartTimeRange] = useState<'24h' | '48h' | '1w' | '1m' | 'all' | 'custom'>('all')
+  const [chartCustomFrom, setChartCustomFrom] = useState('')
+  const [chartCustomTo, setChartCustomTo] = useState('')
+  const [chartViewMode, setChartViewMode] = useState<'cumulative' | 'daily_gain'>('cumulative')
 
   const [brandSOVLang, setBrandSOVLang] = useState<string>('all')
   const [brandSOVFormat, setBrandSOVFormat] = useState<'all' | 'long' | 'short'>('all')
@@ -437,7 +443,7 @@ export default function OverviewPage() {
   // ── Derived analytics (all memoised) ──────────────────────────────
   const analytics = useMemo(() => {
     // 1. Views Trend: use real daily data from DB when available, else generate
-    let timeline: { date: string; views: number; videos: number; keywords: number }[]
+    let timeline: { date: string; rawDate: string; views: number; videos: number; keywords: number }[]
     const realDailyViews = overview?.dailyViews as { date: string; views: number }[] | undefined
     const realDailyVideos = overview?.dailyNewVideos as { date: string; count: number }[] | undefined
     const realDailyKw = overview?.dailyKeywordsAdded as { date: string; count: number }[] | undefined
@@ -465,6 +471,7 @@ export default function OverviewPage() {
         const dateObj = new Date(d + 'T00:00:00')
         return {
           date: dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          rawDate: d,
           views: viewsMap.get(d) || 0,
           videos: cumVideosMap.get(d) || 0,
           keywords: cumKwMap.get(d) || 0,
@@ -690,9 +697,41 @@ export default function OverviewPage() {
 
     const isDemo = showDemo
 
+    const rawTimeline = isDemo ? buildDemoTimeline(ovTrendDays) : timeline
+
+    let filteredTimeline = rawTimeline
+    if (chartTimeRange !== 'all') {
+      const now = new Date()
+      if (chartTimeRange === '24h') {
+        filteredTimeline = rawTimeline.filter(t => {
+          const d = new Date(t.rawDate + 'T23:59:59')
+          return (now.getTime() - d.getTime()) <= 24 * 3600 * 1000
+        })
+      } else if (chartTimeRange === '48h') {
+        filteredTimeline = rawTimeline.filter(t => {
+          const d = new Date(t.rawDate + 'T23:59:59')
+          return (now.getTime() - d.getTime()) <= 48 * 3600 * 1000
+        })
+      } else if (chartTimeRange === '1w') {
+        filteredTimeline = rawTimeline.filter(t => {
+          const d = new Date(t.rawDate + 'T23:59:59')
+          return (now.getTime() - d.getTime()) <= 7 * 24 * 3600 * 1000
+        })
+      } else if (chartTimeRange === '1m') {
+        filteredTimeline = rawTimeline.filter(t => {
+          const d = new Date(t.rawDate + 'T23:59:59')
+          return (now.getTime() - d.getTime()) <= 30 * 24 * 3600 * 1000
+        })
+      } else if (chartTimeRange === 'custom' && chartCustomFrom && chartCustomTo) {
+        filteredTimeline = rawTimeline.filter(t => t.rawDate >= chartCustomFrom && t.rawDate <= chartCustomTo)
+      }
+    }
+    if (filteredTimeline.length === 0) filteredTimeline = rawTimeline
+
     return {
       isDemo,
-      timeline: isDemo ? buildDemoTimeline(ovTrendDays) : timeline,
+      timeline: rawTimeline,
+      filteredTimeline,
       topViews:          isDemo ? DEMO_BRAND_VIEWS      : topViews,
       topFreq:           isDemo ? DEMO_BRAND_FREQ       : topFreq,
       brandBar:          isDemo ? DEMO_BRAND_BAR        : brandBar,
@@ -709,11 +748,11 @@ export default function OverviewPage() {
       coverageRate, untaggedRatio,
       filteredBrandVideos, filteredRankVideos, regionalData, topCategory
     }
-  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo, regionalApiStats, regionalApiCounts, totalRegionalViews])
+  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo, regionalApiStats, regionalApiCounts, totalRegionalViews, chartTimeRange, chartCustomFrom, chartCustomTo])
 
   const {
     isDemo,
-    timeline, topViews, topFreq, brandBar, brandPositioning, brandEfficiency,
+    timeline, filteredTimeline, topViews, topFreq, brandBar, brandPositioning, brandEfficiency,
     channels, topCreatorChart, creatorRadar,
     longForm, shorts, totalViews, longViews, shortViews,
     rankBuckets, langData, keywordTypeData, keywordActivity,
@@ -1048,120 +1087,232 @@ export default function OverviewPage() {
             </div>
 
             {/* Views timeline with individual widget filter and View More button */}
-            <Card
-              title="Ranked views tracker"
-              sub="Daily cumulative views of top-ranked videos"
-              height={320}
-              right={
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <select className="select-filter" value={ovTrendFormat} onChange={(e) => setOvTrendFormat(e.target.value as any)}>
+            <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #F1F5F9', padding: '20px 24px 16px', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+              {/* ── Header Row ── */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginBottom: 2 }}>Ranked Views Tracker</div>
+                  <div style={{ fontSize: 11.5, color: '#94A3B8' }}>Daily cumulative views of your top-ranked videos</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  {/* View mode toggle */}
+                  <div style={{ display: 'flex', background: '#F1F5F9', borderRadius: 8, padding: 2 }}>
+                    {(['cumulative', 'daily_gain'] as const).map(mode => (
+                      <button key={mode} onClick={() => setChartViewMode(mode)} style={{
+                        padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                        background: chartViewMode === mode ? '#fff' : 'transparent',
+                        color: chartViewMode === mode ? '#0F172A' : '#94A3B8',
+                        boxShadow: chartViewMode === mode ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}>{mode === 'cumulative' ? 'Cumulative' : 'Daily Gain'}</button>
+                    ))}
+                  </div>
+                  {/* Time range chips */}
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {([['24h', '24h'], ['48h', '48h'], ['1w', '1W'], ['1m', '1M'], ['all', 'All']] as const).map(([val, label]) => (
+                      <button key={val} onClick={() => setChartTimeRange(val)} style={{
+                        padding: '5px 10px', borderRadius: 6, border: '1.5px solid',
+                        borderColor: chartTimeRange === val ? '#1A73E8' : '#E2E8F0',
+                        background: chartTimeRange === val ? '#EFF6FF' : '#fff',
+                        color: chartTimeRange === val ? '#1A73E8' : '#94A3B8',
+                        fontSize: 10.5, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease',
+                      }}>{label}</button>
+                    ))}
+                    <button onClick={() => setChartTimeRange(chartTimeRange === 'custom' ? 'all' : 'custom')} style={{
+                      padding: '5px 10px', borderRadius: 6, border: '1.5px solid',
+                      borderColor: chartTimeRange === 'custom' ? '#8B5CF6' : '#E2E8F0',
+                      background: chartTimeRange === 'custom' ? '#F5F3FF' : '#fff',
+                      color: chartTimeRange === 'custom' ? '#8B5CF6' : '#94A3B8',
+                      fontSize: 10.5, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s ease',
+                    }}>Custom</button>
+                  </div>
+                  {/* Format filter */}
+                  <select className="select-filter" value={ovTrendFormat} onChange={(e) => setOvTrendFormat(e.target.value as any)} style={{ fontSize: 10.5, padding: '4px 8px' }}>
                     <option value="all">All formats</option>
                     <option value="long">Long-form</option>
                     <option value="short">Shorts</option>
                   </select>
-                  <button onClick={() => setDrawerType('views_detail')} style={{ background: '#F1F5F9', border: 'none', padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer', color: '#1E293B' }}>
+                  <button onClick={() => setDrawerType('views_detail')} style={{ background: '#F1F5F9', border: 'none', padding: '5px 10px', borderRadius: 6, fontSize: 10.5, fontWeight: 700, cursor: 'pointer', color: '#1E293B' }}>
                     View more
                   </button>
                 </div>
-              }
-            >
+              </div>
+
+              {/* ── Custom Date Range Picker ── */}
+              {chartTimeRange === 'custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, padding: '10px 14px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B' }}>From</span>
+                  <input type="date" value={chartCustomFrom} onChange={(e) => setChartCustomFrom(e.target.value)} style={{
+                    padding: '4px 10px', borderRadius: 6, border: '1px solid #E2E8F0', fontSize: 11, fontWeight: 600,
+                    color: '#0F172A', background: '#fff', outline: 'none',
+                  }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B' }}>to</span>
+                  <input type="date" value={chartCustomTo} onChange={(e) => setChartCustomTo(e.target.value)} style={{
+                    padding: '4px 10px', borderRadius: 6, border: '1px solid #E2E8F0', fontSize: 11, fontWeight: 600,
+                    color: '#0F172A', background: '#fff', outline: 'none',
+                  }} />
+                  <button onClick={() => { setChartCustomFrom(''); setChartCustomTo(''); setChartTimeRange('all') }} style={{
+                    fontSize: 10, fontWeight: 700, color: '#EF4444', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px',
+                  }}>Clear</button>
+                </div>
+              )}
+
               {timeline.length < 2 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8 }}>
-                  <div style={{ fontSize: 36, fontWeight: 800, color: '#0F172A' }}>{fmtIndian(overview?.totalViewership || 0)}</div>
+                /* ── Empty State ── */
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 220, gap: 6 }}>
+                  <div style={{ fontSize: 42, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{fmtIndian(overview?.totalViewership || 0)}</div>
                   <div style={{ fontSize: 13, color: '#64748B', fontWeight: 500 }}>Total ranked video views</div>
                   <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, padding: '6px 16px', background: '#F8FAFC', borderRadius: 8 }}>
                     Run the daily views refresh to start tracking trends
                   </div>
                 </div>
               ) : (() => {
-                const latest = timeline[timeline.length - 1]?.views || 0
-                const prev = timeline[timeline.length - 2]?.views || 0
+                const data = filteredTimeline.length >= 1 ? filteredTimeline : timeline
+                const latest = data[data.length - 1]?.views || 0
+                const prev = data.length >= 2 ? data[data.length - 2]?.views || 0 : 0
                 const delta = latest - prev
                 const pctChange = prev > 0 ? ((delta / prev) * 100).toFixed(1) : '0'
-                const isLine = timeline.length > 7
-                const minVal = Math.min(...timeline.map(t => t.views))
-                const maxVal = Math.max(...timeline.map(t => t.views))
-                const yMin = Math.max(0, minVal - (maxVal - minVal) * 0.1 || minVal * 0.95)
-                const yMax = maxVal + (maxVal - minVal) * 0.15 || maxVal * 1.05
+                const isLine = data.length > 7
+                const minVal = Math.min(...data.map(t => t.views))
+                const maxVal = Math.max(...data.map(t => t.views))
+                const range = maxVal - minVal || 1
+                const yMin = Math.max(0, minVal - range * 0.15)
+                const yMax = maxVal + range * 0.2
+                const totalGain = data.length >= 2 ? data[data.length - 1].views - data[0].views : 0
+                const avgGain = data.length >= 2 ? totalGain / (data.length - 1) : 0
+
+                const chartData = chartViewMode === 'daily_gain' && data.length >= 2
+                  ? data.map((d, i) => ({
+                      ...d,
+                      gain: i > 0 ? d.views - data[i - 1].views : 0,
+                    }))
+                  : data
+
+                const gainMin = chartViewMode === 'daily_gain' ? Math.min(...chartData.map((d: any) => d.gain || 0)) : 0
+                const gainMax = chartViewMode === 'daily_gain' ? Math.max(...chartData.map((d: any) => d.gain || 0)) : 0
+                const gainRange = gainMax - gainMin || 1
+                const gYMin = Math.min(0, gainMin - gainRange * 0.15)
+                const gYMax = gainMax + gainRange * 0.2
 
                 return (
-                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
-                    {/* Summary stats */}
-                    <div style={{ display: 'flex', gap: 20, alignItems: 'baseline', padding: '0 2px' }}>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Total Views</div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(latest)}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Day-over-Day</div>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                          <span style={{ fontSize: 18, fontWeight: 800, color: delta >= 0 ? '#059669' : '#DC2626', fontFamily: "'JetBrains Mono', monospace" }}>
-                            {delta >= 0 ? '+' : ''}{pctChange}%
-                          </span>
-                          <span style={{ fontSize: 12, color: delta >= 0 ? '#059669' : '#DC2626', fontWeight: 600 }}>
-                            ({delta >= 0 ? '+' : ''}{fmt(delta)})
-                          </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* ── Stats Cards Row ── */}
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      {[
+                        { label: 'Total Views', value: fmtIndian(latest), color: '#0F172A', mono: true },
+                        { label: chartViewMode === 'daily_gain' ? 'Period Gain' : 'Day-over-Day', value: `${delta >= 0 ? '+' : ''}${pctChange}%`, sub: `(${delta >= 0 ? '+' : ''}${fmt(delta)})`, color: delta >= 0 ? '#059669' : '#DC2626', mono: true },
+                        { label: 'Tracked Videos', value: (overview?.rankedVideos || 0).toLocaleString(), color: '#1A73E8', mono: true },
+                        { label: 'Avg Daily Gain', value: fmt(avgGain), color: '#8B5CF6', mono: true },
+                      ].map((s, i) => (
+                        <div key={i} style={{
+                          flex: 1, padding: '10px 14px', borderRadius: 10,
+                          background: '#F8FAFC', border: '1px solid #F1F5F9',
+                        }}>
+                          <div style={{ fontSize: 9.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>{s.label}</div>
+                          <div style={{ fontSize: 18, fontWeight: 800, color: s.color, fontFamily: s.mono ? "'JetBrains Mono', monospace" : 'inherit', display: 'flex', alignItems: 'baseline', gap: 4 }}>
+                            {s.value}
+                            {s.sub && <span style={{ fontSize: 11, fontWeight: 600 }}>{s.sub}</span>}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Tracked Videos</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{overview?.rankedVideos || 0}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Snapshots</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{timeline.length}</div>
-                      </div>
+                      ))}
                     </div>
-                    {/* Chart */}
-                    <div style={{ flex: 1, minHeight: 0 }}>
+
+                    {/* ── Chart ── */}
+                    <div style={{ height: 200 }}>
                       <ResponsiveContainer width="100%" height="100%">
                         {isLine ? (
-                          <AreaChart data={timeline} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                          <AreaChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                             <defs>
                               <linearGradient id="gv3" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10B981" stopOpacity={0.12} />
-                                <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                                <stop offset="0%" stopColor={chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981'} stopOpacity={0.18} />
+                                <stop offset="100%" stopColor={chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981'} stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
                             <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                            <YAxis domain={[yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
+                            <YAxis domain={chartViewMode === 'daily_gain' ? [gYMin, gYMax] : [yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
                             <Tooltip content={({ active, payload, label }: any) => {
                               if (!active || !payload?.length) return null
+                              const item = data.find((d: any) => d.date === label)
+                              const idx = data.findIndex((d: any) => d.date === label)
+                              const val = chartViewMode === 'daily_gain' ? (payload[0]?.payload?.gain || 0) : (payload[0]?.value || 0)
+                              const prevVal = idx > 0 ? data[idx - 1]?.views || 0 : 0
                               return (
-                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 4 }}>{label}</div>
-                                  <div style={{ fontSize: 14, fontWeight: 700, color: '#10B981' }}>{fmt(payload[0]?.value || 0)}</div>
-                                  <div style={{ fontSize: 10, color: '#94A3B8' }}>cumulative ranked views</div>
-                                </div>
-                              )
-                            }} />
-                            <Area type="monotone" dataKey="views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv3)" dot={{ r: 3, fill: '#10B981', strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0, fill: '#10B981' }} />
-                          </AreaChart>
-                        ) : (
-                          <BarChart data={timeline} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                            <YAxis domain={[yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
-                            <Tooltip content={({ active, payload, label }: any) => {
-                              if (!active || !payload?.length) return null
-                              const idx = timeline.findIndex(t => t.date === label)
-                              const val = payload[0]?.value || 0
-                              const prevVal = idx > 0 ? timeline[idx - 1]?.views || 0 : 0
-                              const gain = idx > 0 ? val - prevVal : 0
-                              return (
-                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 6 }}>{label}</div>
-                                  <div style={{ fontSize: 14, fontWeight: 700, color: '#FFF', marginBottom: 2 }}>{fmt(val)} views</div>
+                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)', minWidth: 180 }}>
+                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 8, borderBottom: '1px solid #334155', paddingBottom: 6 }}>{label}</div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 10, color: '#94A3B8' }}>Cumulative</span>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: '#FFF' }}>{fmt(item?.views || 0)}</span>
+                                  </div>
                                   {idx > 0 && (
-                                    <div style={{ fontSize: 11, color: gain >= 0 ? '#34D399' : '#F87171' }}>
-                                      {gain >= 0 ? '+' : ''}{fmt(gain)} from previous day
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: 10, color: '#94A3B8' }}>Day gain</span>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: (item?.views || 0) - prevVal >= 0 ? '#34D399' : '#F87171' }}>
+                                        {(item?.views || 0) - prevVal >= 0 ? '+' : ''}{fmt((item?.views || 0) - prevVal)}
+                                      </span>
                                     </div>
                                   )}
                                 </div>
                               )
                             }} />
-                            <Bar dataKey="views" name="Ranked Views" radius={[4, 4, 0, 0]} fill="#10B981" />
+                            <Area type="monotone" dataKey={chartViewMode === 'daily_gain' ? 'gain' : 'views'} stroke={chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981'} strokeWidth={2.5} fill="url(#gv3)" dot={{ r: 3.5, fill: chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981', strokeWidth: 0 }} activeDot={{ r: 6, strokeWidth: 0, fill: chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981' }} />
+                          </AreaChart>
+                        ) : (
+                          <BarChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }} barCategoryGap="25%">
+                            <defs>
+                              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor={chartViewMode === 'daily_gain' ? '#8B5CF6' : '#10B981'} stopOpacity={1} />
+                                <stop offset="100%" stopColor={chartViewMode === 'daily_gain' ? '#7C3AED' : '#059669'} stopOpacity={0.85} />
+                              </linearGradient>
+                              <linearGradient id="barGradNeg" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#F87171" stopOpacity={0.85} />
+                                <stop offset="100%" stopColor="#DC2626" stopOpacity={1} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                            <YAxis domain={chartViewMode === 'daily_gain' ? [gYMin, gYMax] : [yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
+                            <Tooltip content={({ active, payload, label }: any) => {
+                              if (!active || !payload?.length) return null
+                              const idx = data.findIndex(t => t.date === label)
+                              const val = payload[0]?.value || 0
+                              const item = data[idx]
+                              const prevVal = idx > 0 ? data[idx - 1]?.views || 0 : 0
+                              const gain = idx > 0 ? (item?.views || 0) - prevVal : 0
+                              return (
+                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '12px 16px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)', minWidth: 180 }}>
+                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 8, borderBottom: '1px solid #334155', paddingBottom: 6 }}>{label}</div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 10, color: '#94A3B8' }}>{chartViewMode === 'daily_gain' ? 'Daily gain' : 'Cumulative'}</span>
+                                    <span style={{ fontSize: 12, fontWeight: 700, color: '#FFF' }}>{fmt(val)}</span>
+                                  </div>
+                                  {chartViewMode !== 'daily_gain' && idx > 0 && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: 10, color: '#94A3B8' }}>Day gain</span>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: gain >= 0 ? '#34D399' : '#F87171' }}>
+                                        {gain >= 0 ? '+' : ''}{fmt(gain)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {chartViewMode === 'daily_gain' && val < 0 && (
+                                    <div style={{ fontSize: 10, color: '#F87171', marginTop: 4 }}>Views decreased</div>
+                                  )}
+                                </div>
+                              )
+                            }} />
+                            <Bar dataKey={chartViewMode === 'daily_gain' ? 'gain' : 'views'} name={chartViewMode === 'daily_gain' ? 'Daily Gain' : 'Ranked Views'} radius={[5, 5, 0, 0]}
+                              fill="url(#barGrad)"
+                              {...(chartViewMode === 'daily_gain' ? {
+                                shape: (props: any) => {
+                                  const { x, y, width, height, value } = props
+                                  const isNeg = value < 0
+                                  return (
+                                    <rect x={x} y={isNeg ? y : y} width={width} height={Math.abs(height)} rx={5} ry={5}
+                                      fill={isNeg ? 'url(#barGradNeg)' : 'url(#barGrad)'} />
+                                  )
+                                }
+                              } : {})}
+                            />
                           </BarChart>
                         )}
                       </ResponsiveContainer>
@@ -1169,7 +1320,7 @@ export default function OverviewPage() {
                   </div>
                 )
               })()}
-            </Card>
+            </div>
 
             {/* Summaries list */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
