@@ -19,9 +19,9 @@ on:
         required: false
         type: string
       chunk_size:
-        description: 'Videos per chunk (max 25, default 15 for Hobby plan)'
+        description: 'Videos per chunk (max 25, default 12 for Hobby plan)'
         required: false
-        default: '15'
+        default: '12'
         type: string
 
 env:
@@ -36,7 +36,7 @@ jobs:
         if: ${{ github.event.inputs.job == 'daily_views' || github.event.inputs.job == '' || github.event.inputs.job == 'auto' }}
         run: |
           JOB_TYPE="${{ github.event.inputs.job || 'daily_views' }}"
-          CHUNK_SIZE="${{ github.event.inputs.chunk_size || '15' }}"
+          CHUNK_SIZE="${{ github.event.inputs.chunk_size || '12' }}"
           CAMPAIGN="${{ github.event.inputs.campaign_id }}"
           AUTH_PARAM=""
           if [ -n "${{ secrets.CRON_SECRET }}" ]; then
