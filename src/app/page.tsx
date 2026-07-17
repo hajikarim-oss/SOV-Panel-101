@@ -369,7 +369,7 @@ export default function OverviewPage() {
 
   const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
     if (!campId) return
-    const cacheKey = `overview:v3:${campId}:${isOurs || 'all'}`
+    const cacheKey = `overview:v4:${campId}:${isOurs || 'all'}`
     const cached = getClientCache<any>(cacheKey)
     if (cached) {
       setOverview(cached.overview)
@@ -1049,8 +1049,8 @@ export default function OverviewPage() {
 
             {/* Views timeline with individual widget filter and View More button */}
             <Card
-              title="Views trend"
-              sub="Ranked video views tracked over time"
+              title="Ranked views tracker"
+              sub="Daily cumulative views of top-ranked videos"
               height={320}
               right={
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1067,77 +1067,108 @@ export default function OverviewPage() {
             >
               {timeline.length < 2 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8 }}>
-                  <div style={{ fontSize: 32, fontWeight: 800, color: '#0F172A' }}>{fmt(overview?.totalViewership || 0)}</div>
-                  <div style={{ fontSize: 12, color: '#64748B' }}>Total ranked video views</div>
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>Run the daily views refresh to see trends over time</div>
+                  <div style={{ fontSize: 36, fontWeight: 800, color: '#0F172A' }}>{fmtIndian(overview?.totalViewership || 0)}</div>
+                  <div style={{ fontSize: 13, color: '#64748B', fontWeight: 500 }}>Total ranked video views</div>
+                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, padding: '6px 16px', background: '#F8FAFC', borderRadius: 8 }}>
+                    Run the daily views refresh to start tracking trends
+                  </div>
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                  {/* Mini stats row above chart */}
-                  <div style={{ display: 'flex', gap: 16, marginBottom: 8, padding: '0 4px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10B981' }} />
-                      <span style={{ fontSize: 11, color: '#64748B' }}>Latest:</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>{fmt(timeline[timeline.length - 1]?.views || 0)}</span>
-                    </div>
-                    {timeline.length >= 2 && (
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 11, color: '#64748B' }}>Previous:</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: '#64748B' }}>{fmt(timeline[timeline.length - 2]?.views || 0)}</span>
+              ) : (() => {
+                const latest = timeline[timeline.length - 1]?.views || 0
+                const prev = timeline[timeline.length - 2]?.views || 0
+                const delta = latest - prev
+                const pctChange = prev > 0 ? ((delta / prev) * 100).toFixed(1) : '0'
+                const isLine = timeline.length > 7
+                const minVal = Math.min(...timeline.map(t => t.views))
+                const maxVal = Math.max(...timeline.map(t => t.views))
+                const yMin = Math.max(0, minVal - (maxVal - minVal) * 0.1 || minVal * 0.95)
+                const yMax = maxVal + (maxVal - minVal) * 0.15 || maxVal * 1.05
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10 }}>
+                    {/* Summary stats */}
+                    <div style={{ display: 'flex', gap: 20, alignItems: 'baseline', padding: '0 2px' }}>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Total Views</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{fmt(latest)}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Day-over-Day</div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: delta >= 0 ? '#059669' : '#DC2626', fontFamily: "'JetBrains Mono', monospace" }}>
+                            {delta >= 0 ? '+' : ''}{pctChange}%
+                          </span>
+                          <span style={{ fontSize: 12, color: delta >= 0 ? '#059669' : '#DC2626', fontWeight: 600 }}>
+                            ({delta >= 0 ? '+' : ''}{fmt(delta)})
+                          </span>
                         </div>
-                        {(() => {
-                          const latest = timeline[timeline.length - 1]?.views || 0
-                          const prev = timeline[timeline.length - 2]?.views || 0
-                          const delta = latest - prev
-                          const pctChange = prev > 0 ? ((delta / prev) * 100).toFixed(1) : '0'
-                          return (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: delta >= 0 ? '#059669' : '#DC2626' }}>
-                                {delta >= 0 ? '+' : ''}{pctChange}%
-                              </span>
-                              <span style={{ fontSize: 10, color: '#94A3B8' }}>({delta >= 0 ? '+' : ''}{fmt(delta)} views)</span>
-                            </div>
-                          )
-                        })()}
-                      </>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: 2, background: '#1A73E8' }} />
-                      <span style={{ fontSize: 11, color: '#64748B' }}>Ranked videos:</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#0F172A' }}>{overview?.rankedVideos || 0}</span>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Tracked Videos</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{overview?.rankedVideos || 0}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 2 }}>Snapshots</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace" }}>{timeline.length}</div>
+                      </div>
+                    </div>
+                    {/* Chart */}
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        {isLine ? (
+                          <AreaChart data={timeline} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="gv3" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#10B981" stopOpacity={0.12} />
+                                <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                            <YAxis domain={[yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
+                            <Tooltip content={({ active, payload, label }: any) => {
+                              if (!active || !payload?.length) return null
+                              return (
+                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 4 }}>{label}</div>
+                                  <div style={{ fontSize: 14, fontWeight: 700, color: '#10B981' }}>{fmt(payload[0]?.value || 0)}</div>
+                                  <div style={{ fontSize: 10, color: '#94A3B8' }}>cumulative ranked views</div>
+                                </div>
+                              )
+                            }} />
+                            <Area type="monotone" dataKey="views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv3)" dot={{ r: 3, fill: '#10B981', strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0, fill: '#10B981' }} />
+                          </AreaChart>
+                        ) : (
+                          <BarChart data={timeline} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
+                            <YAxis domain={[yMin, yMax]} tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
+                            <Tooltip content={({ active, payload, label }: any) => {
+                              if (!active || !payload?.length) return null
+                              const idx = timeline.findIndex(t => t.date === label)
+                              const val = payload[0]?.value || 0
+                              const prevVal = idx > 0 ? timeline[idx - 1]?.views || 0 : 0
+                              const gain = idx > 0 ? val - prevVal : 0
+                              return (
+                                <div style={{ background: '#0F172A', borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                                  <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 6 }}>{label}</div>
+                                  <div style={{ fontSize: 14, fontWeight: 700, color: '#FFF', marginBottom: 2 }}>{fmt(val)} views</div>
+                                  {idx > 0 && (
+                                    <div style={{ fontSize: 11, color: gain >= 0 ? '#34D399' : '#F87171' }}>
+                                      {gain >= 0 ? '+' : ''}{fmt(gain)} from previous day
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            }} />
+                            <Bar dataKey="views" name="Ranked Views" radius={[4, 4, 0, 0]} fill="#10B981" />
+                          </BarChart>
+                        )}
+                      </ResponsiveContainer>
                     </div>
                   </div>
-                  {/* Chart */}
-                  <div style={{ flex: 1, minHeight: 0 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={timeline} margin={{ top: 4, right: 16, left: -10, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="gv2" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#10B981" stopOpacity={0.12} />
-                            <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                        <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
-                        <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} tickFormatter={v => fmt(v)} />
-                        <Tooltip
-                          content={({ active, payload, label }: any) => {
-                            if (!active || !payload?.length) return null
-                            return (
-                              <div style={{ background: '#0F172A', borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 32px rgba(0,0,0,0.35)', minWidth: 160, border: '1px solid rgba(255,255,255,0.06)' }}>
-                                <div style={{ fontSize: 11, color: '#64748B', fontWeight: 700, marginBottom: 6 }}>{label}</div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: '#10B981' }}>{fmt(payload[0]?.value || 0)} ranked views</div>
-                              </div>
-                            )
-                          }}
-                        />
-                        <Area type="monotone" dataKey="views" name="Ranked Views" stroke="#10B981" strokeWidth={2.5} fill="url(#gv2)" dot={{ r: 3, fill: '#10B981', strokeWidth: 0 }} activeDot={{ r: 5, strokeWidth: 0, fill: '#10B981' }} />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
+                )
+              })()}
             </Card>
 
             {/* Summaries list */}

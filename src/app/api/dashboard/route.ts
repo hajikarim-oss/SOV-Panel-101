@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:v3:${cid}:${isOurs || 'all'}`,
+      `dashboard:v4:${cid}:${isOurs || 'all'}`,
       () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )
@@ -62,7 +62,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   const totalKeywords = keywords.length
   const allCvVideoIds = [...new Set((cvRes.data || []).map((r: any) => r.video_id))]
   const totalVideos = allCvVideoIds.length
-  const rankedVideos = (kvRes.data || []).length + (ksRes.data || []).length
+  const rankedVideos = new Set<string>([...(kvRes.data || []).map((r: any) => r.video_id), ...(ksRes.data || []).map((r: any) => r.video_id)]).size
   const brandTags = (btRes.data || [])
   const newVidsLast7Days = (cvNewRes.data || []).length
 
@@ -326,8 +326,7 @@ async function getDailyData(
 }
 
 // view_snapshots stores CUMULATIVE view_count per video per day
-// Returns total views per day (filtered to top-10 ranked videos)
-// Forward-fills missing snapshots so views never decrease
+// Returns total ranked views per day (forward-filled, never decreases)
 async function getDailyViewDeltas(
   campaignId: string | null,
   top10VideoIds: Set<string>,
@@ -339,7 +338,6 @@ async function getDailyViewDeltas(
   const { data } = await q
   if (!data || data.length === 0) return []
 
-  // Collect all dates and per-video snapshots
   const allDates = new Set<string>()
   const videoSnapshots = new Map<string, Map<string, number>>()
   for (const row of data as any[]) {
@@ -353,16 +351,14 @@ async function getDailyViewDeltas(
   const sortedDates = Array.from(allDates).sort()
   if (sortedDates.length === 0) return []
 
-  // Forward-fill: for each video, carry forward its last known view count
-  const result: { date: string; views: number }[] = []
+  // Forward-fill: carry forward last known view count per video
   const lastKnown = new Map<string, number>()
+  const result: { date: string; views: number }[] = []
 
   for (const date of sortedDates) {
     let dayTotal = 0
     for (const [vid, snaps] of videoSnapshots) {
-      if (snaps.has(date)) {
-        lastKnown.set(vid, snaps.get(date)!)
-      }
+      if (snaps.has(date)) lastKnown.set(vid, snaps.get(date)!)
       dayTotal += lastKnown.get(vid) || 0
     }
     result.push({ date, views: dayTotal })
