@@ -331,6 +331,8 @@ export default function OverviewPage() {
   const [overview, setOverview] = useState<any>(null)
   const [keywords, setKeywords] = useState<any[]>([])
   const [videos, setVideos] = useState<any[]>([])
+  const [regionalApiStats, setRegionalApiStats] = useState<Record<string, number>>({})
+  const [regionalApiCounts, setRegionalApiCounts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [hasData, setHasData] = useState(false)
@@ -366,12 +368,14 @@ export default function OverviewPage() {
 
   const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
     if (!campId) return
-    const cacheKey = `overview:v2:${campId}:${isOurs || 'all'}`
+    const cacheKey = `overview:v3:${campId}:${isOurs || 'all'}`
     const cached = getClientCache<any>(cacheKey)
     if (cached) {
       setOverview(cached.overview)
       setKeywords(cached.keywords)
       setVideos(cached.videos)
+      setRegionalApiStats(cached.regionalStats || {})
+      setRegionalApiCounts(cached.regionalCounts || {})
       setHasData(!cached.overview.error && cached.overview.totalVideos > 0)
       setLoading(false)
       return
@@ -384,8 +388,10 @@ export default function OverviewPage() {
       setOverview(d.overview)
       setKeywords(d.keywords ?? [])
       setVideos(d.topVideos ?? [])
+      setRegionalApiStats(d.regionalStats || {})
+      setRegionalApiCounts(d.regionalVideoCounts || {})
       setHasData(!d.overview?.error && d.overview?.totalVideos > 0)
-      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [] })
+      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [], regionalStats: d.regionalStats || {}, regionalCounts: d.regionalVideoCounts || {} })
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
@@ -648,27 +654,19 @@ export default function OverviewPage() {
     })
     const topCategory = maxType.charAt(0).toUpperCase() + maxType.slice(1)
 
-    // 5. Geographic regional stats based on selected keywords languages
+    // 5. Geographic regional stats from API (computed from same top-10-per-keyword set as totalViewership)
+    const sovDenominator = overview?.totalViewership || 0
     const regionalData = languageRegions.map((region) => {
       const isRegionActive = distinctLanguages.includes(region.langCode)
-      let rViews = 0
-      let rVideosCount = 0
-
-      if (isRegionActive) {
-        const matchingKws = keywords.filter((k: any) => k.language === region.langCode).map((k: any) => k.text)
-        const matchingVideos = videos.filter((v: any) =>
-          (v.keywords_appeared || []).some((kwText: string) => matchingKws.includes(kwText))
-        )
-        rViews = matchingVideos.reduce((sum, v) => sum + (v.view_count || 0), 0)
-        rVideosCount = matchingVideos.length
-      }
+      const rViews = regionalApiStats[region.langCode] || 0
+      const rVideosCount = regionalApiCounts[region.langCode] || 0
 
       return {
         ...region,
         active: isRegionActive,
         views: rViews,
         videosCount: rVideosCount,
-        sovPct: totalViews > 0 ? pct(rViews, totalViews) : 0
+        sovPct: sovDenominator > 0 ? pct(rViews, sovDenominator) : 0
       }
     }).sort((a, b) => b.views - a.views)
 
@@ -693,7 +691,7 @@ export default function OverviewPage() {
       coverageRate, untaggedRatio,
       filteredBrandVideos, filteredRankVideos, regionalData, topCategory
     }
-  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo])
+  }, [overview, videos, keywords, ovTrendDays, ovTrendFormat, brandSOVLang, brandSOVFormat, creatorFormat, creatorMinVideos, rankRangeFilter, rankBrandFilter, videoLanguagesMap, showDemo, regionalApiStats, regionalApiCounts])
 
   const {
     isDemo,

@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:v2:${cid}:${isOurs || 'all'}`,
+      `dashboard:v3:${cid}:${isOurs || 'all'}`,
       () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )
@@ -119,9 +119,43 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   for (const v of videoRows) {
     if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
   }
+
+  // Build keyword_id → language map for regional SOV
+  const kwLangMap = new Map<string, string>()
+  for (const kw of keywords) { kwLangMap.set(kw.id, kw.language || 'en') }
+
+  // Pre-build video_id → Set<language> from keyword_videos + keyword_shorts
+  const videoLangMap = new Map<string, Set<string>>()
+  for (const kv of (kvRes.data || [])) {
+    const lang = kwLangMap.get(kv.keyword_id)
+    if (lang) {
+      if (!videoLangMap.has(kv.video_id)) videoLangMap.set(kv.video_id, new Set())
+      videoLangMap.get(kv.video_id)!.add(lang)
+    }
+  }
+  for (const ks of (ksRes.data || [])) {
+    const lang = kwLangMap.get(ks.keyword_id)
+    if (lang) {
+      if (!videoLangMap.has(ks.video_id)) videoLangMap.set(ks.video_id, new Set())
+      videoLangMap.get(ks.video_id)!.add(lang)
+    }
+  }
+
+  // Track per-language views from top-10-per-keyword videos only
+  const langViewsMap = new Map<string, number>()
+  const langVideoCountMap = new Map<string, number>()
+
   for (const vid of top10VideoIdsPerKw) {
     const v = videoMap.get(vid)
     if (v) totalViewership += v.view_count || 0
+
+    const vidLangs = videoLangMap.get(vid)
+    if (vidLangs) {
+      for (const lang of vidLangs) {
+        langViewsMap.set(lang, (langViewsMap.get(lang) || 0) + (v.view_count || 0))
+        langVideoCountMap.set(lang, (langVideoCountMap.get(lang) || 0) + 1)
+      }
+    }
   }
 
   // Compute "our videos" stats before filtering
@@ -254,6 +288,8 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     keywords: enrichedKeywords,
     topVideos,
     campaignBrands: (cbRes.data || []).map((b: any) => b.name),
+    regionalStats: Object.fromEntries(langViewsMap.entries()),
+    regionalVideoCounts: Object.fromEntries(langVideoCountMap.entries()),
   }
 }
 
