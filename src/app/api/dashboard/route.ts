@@ -204,8 +204,8 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     transcriptCoverage = totalVideos > 0 ? Math.round(((transcriptData?.length || 0) / totalVideos) * 100) : 0
   } catch {}
 
-  const [dailyViews, dailyNewVideos, dailyKeywords] = await Promise.all([
-    getDailyData('view_snapshots', 'snapshot_date', 'view_count', cid, 'SUM'),
+  const [dailyViewsRaw, dailyNewVideos, dailyKeywords] = await Promise.all([
+    getDailyViewDeltas(cid, top10VideoIdsPerKw),
     getDailyData('campaign_videos', 'first_seen_at', 'video_id', cid, 'COUNT'),
     getDailyData('keywords', 'created_at', 'id', cid, 'COUNT'),
   ])
@@ -281,7 +281,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
       },
       activeScrapingJobs: (sjRes.data || []).length,
       transcriptCoverage,
-      dailyViews,
+      dailyViews: dailyViewsRaw,
       dailyNewVideos,
       dailyKeywordsAdded: dailyKeywords,
       ourVideos: { count: ourVideoCount, views: ourVideoViews },
@@ -323,6 +323,45 @@ async function getDailyData(
       date,
       ...(agg === 'SUM' ? { views: vals.reduce((s, v) => s + v, 0) } : { count: vals.length }),
     }))
+}
+
+// view_snapshots stores CUMULATIVE view_count per video per day
+// daily views = total_views_today - total_views_yesterday (the delta)
+// Only counts views from top-10-per-keyword ranked videos
+async function getDailyViewDeltas(
+  campaignId: string | null,
+  top10VideoIds: Set<string>,
+): Promise<{ date: string; views: number }[]> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+  let q = supabase.from('view_snapshots').select('snapshot_date, view_count, video_id')
+  if (campaignId) q = q.eq('campaign_id', campaignId)
+  q = q.gte('snapshot_date', thirtyDaysAgo).order('snapshot_date', { ascending: true })
+  const { data } = await q
+  if (!data || data.length === 0) return []
+
+  // Sum view_counts per day, but ONLY for top-10 ranked videos
+  const dayTotals = new Map<string, number>()
+  for (const row of data as any[]) {
+    if (!top10VideoIds.has(row.video_id)) continue
+    const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
+    dayTotals.set(dateStr, (dayTotals.get(dateStr) || 0) + (row.view_count || 0))
+  }
+
+  const sortedDates = Array.from(dayTotals.keys()).sort()
+  if (sortedDates.length === 0) return []
+
+  // First day: use raw total as baseline (no previous day to diff against)
+  const result: { date: string; views: number }[] = []
+  result.push({ date: sortedDates[0], views: dayTotals.get(sortedDates[0]) || 0 })
+
+  for (let i = 1; i < sortedDates.length; i++) {
+    const prev = dayTotals.get(sortedDates[i - 1]) || 0
+    const curr = dayTotals.get(sortedDates[i]) || 0
+    const delta = curr - prev
+    result.push({ date: sortedDates[i], views: Math.max(0, delta) })
+  }
+
+  return result
 }
 
 function pctChange(now: number, prev: number) {
