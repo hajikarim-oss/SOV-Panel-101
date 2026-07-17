@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:${cid}:${isOurs || 'all'}`,
+      `dashboard:v2:${cid}:${isOurs || 'all'}`,
       () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )

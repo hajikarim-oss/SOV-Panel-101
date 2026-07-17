@@ -366,7 +366,7 @@ export default function OverviewPage() {
 
   const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
     if (!campId) return
-    const cacheKey = `overview:${campId}:${isOurs || 'all'}`
+    const cacheKey = `overview:v2:${campId}:${isOurs || 'all'}`
     const cached = getClientCache<any>(cacheKey)
     if (cached) {
       setOverview(cached.overview)
