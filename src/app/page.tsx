@@ -915,7 +915,7 @@ export default function OverviewPage() {
                 value={fmtIndian(overview?.totalViewership ?? 0)}
                 icon={Eye}
                 color="#10B981"
-                info="Aggregated view count from top 10 ranked videos per keyword (deduplicated)."
+                info="Aggregated view count from all campaign videos."
               />
               <MetricCard
                 label="Top keyword type"
@@ -1091,8 +1091,8 @@ export default function OverviewPage() {
               {/* ── Header Row ── */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginBottom: 2 }}>Ranked Views Tracker</div>
-                  <div style={{ fontSize: 11.5, color: '#94A3B8' }}>Daily cumulative views of your top-ranked videos</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginBottom: 2 }}>Views Tracker</div>
+                  <div style={{ fontSize: 11.5, color: '#94A3B8' }}>Daily cumulative views across all {overview?.totalVideos || 0} campaign videos</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   {/* View mode toggle */}
@@ -1201,7 +1201,7 @@ export default function OverviewPage() {
                       {[
                         { label: 'Total Views', value: fmtIndian(latest), color: '#0F172A', mono: true },
                         { label: chartViewMode === 'daily_gain' ? 'Period Gain' : 'Day-over-Day', value: `${delta >= 0 ? '+' : ''}${pctChange}%`, sub: `(${delta >= 0 ? '+' : ''}${fmt(delta)})`, color: delta >= 0 ? '#059669' : '#DC2626', mono: true },
-                        { label: 'Tracked Videos', value: (overview?.rankedVideos || 0).toLocaleString(), color: '#1A73E8', mono: true },
+                        { label: 'Campaign Videos', value: (overview?.totalVideos || 0).toLocaleString(), color: '#1A73E8', mono: true },
                         { label: 'Avg Daily Gain', value: fmt(avgGain), color: '#8B5CF6', mono: true },
                       ].map((s, i) => (
                         <div key={i} style={{

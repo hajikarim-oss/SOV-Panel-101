@@ -114,11 +114,15 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
     for (const ks of kss) top10VideoIdsPerKw.add(ks.video_id)
   }
 
+  // Total Viewership: sum of ALL campaign video views (all 821 videos)
   let totalViewership = 0
   const channelFreq = new Map<string, number>()
   for (const v of videoRows) {
+    totalViewership += v.view_count || 0
     if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
   }
+
+  // Regional SOV still uses only top-10 ranked videos per keyword
 
   // Build keyword_id → language map for regional SOV
   const kwLangMap = new Map<string, string>()
@@ -148,7 +152,6 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   for (const vid of top10VideoIdsPerKw) {
     const v = videoMap.get(vid)
     if (!v) continue
-    totalViewership += v.view_count || 0
 
     const vidLangs = videoLangMap.get(vid)
     if (vidLangs) {
@@ -205,7 +208,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
   } catch {}
 
   const [dailyViewsRaw, dailyNewVideos, dailyKeywords] = await Promise.all([
-    getDailyViewDeltas(cid, top10VideoIdsPerKw),
+    getDailyViewDeltas(cid, new Set(allCvVideoIds)),
     getDailyData('campaign_videos', 'first_seen_at', 'video_id', cid, 'COUNT'),
     getDailyData('keywords', 'created_at', 'id', cid, 'COUNT'),
   ])
@@ -326,10 +329,10 @@ async function getDailyData(
 }
 
 // view_snapshots stores CUMULATIVE view_count per video per day
-// Returns total ranked views per day (forward-filled, never decreases)
+// Returns total campaign views per day (forward-filled, never decreases)
 async function getDailyViewDeltas(
   campaignId: string | null,
-  top10VideoIds: Set<string>,
+  allowedVideoIds: Set<string>,
 ): Promise<{ date: string; views: number }[]> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
   let q = supabase.from('view_snapshots').select('snapshot_date, view_count, video_id')
@@ -341,7 +344,7 @@ async function getDailyViewDeltas(
   const allDates = new Set<string>()
   const videoSnapshots = new Map<string, Map<string, number>>()
   for (const row of data as any[]) {
-    if (!top10VideoIds.has(row.video_id)) continue
+    if (!allowedVideoIds.has(row.video_id)) continue
     const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
     allDates.add(dateStr)
     if (!videoSnapshots.has(row.video_id)) videoSnapshots.set(row.video_id, new Map())
