@@ -327,7 +327,7 @@ async function getDailyData(
 
 // view_snapshots stores CUMULATIVE view_count per video per day
 // Returns total views per day (filtered to top-10 ranked videos)
-// The client chart shows the growth trend of these cumulative totals
+// Forward-fills missing snapshots so views never decrease
 async function getDailyViewDeltas(
   campaignId: string | null,
   top10VideoIds: Set<string>,
@@ -339,17 +339,36 @@ async function getDailyViewDeltas(
   const { data } = await q
   if (!data || data.length === 0) return []
 
-  // Sum view_counts per day for top-10 videos only
-  const dayTotals = new Map<string, number>()
+  // Collect all dates and per-video snapshots
+  const allDates = new Set<string>()
+  const videoSnapshots = new Map<string, Map<string, number>>()
   for (const row of data as any[]) {
     if (!top10VideoIds.has(row.video_id)) continue
     const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
-    dayTotals.set(dateStr, (dayTotals.get(dateStr) || 0) + (row.view_count || 0))
+    allDates.add(dateStr)
+    if (!videoSnapshots.has(row.video_id)) videoSnapshots.set(row.video_id, new Map())
+    videoSnapshots.get(row.video_id)!.set(dateStr, row.view_count || 0)
   }
 
-  return Array.from(dayTotals.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, views]) => ({ date, views }))
+  const sortedDates = Array.from(allDates).sort()
+  if (sortedDates.length === 0) return []
+
+  // Forward-fill: for each video, carry forward its last known view count
+  const result: { date: string; views: number }[] = []
+  const lastKnown = new Map<string, number>()
+
+  for (const date of sortedDates) {
+    let dayTotal = 0
+    for (const [vid, snaps] of videoSnapshots) {
+      if (snaps.has(date)) {
+        lastKnown.set(vid, snaps.get(date)!)
+      }
+      dayTotal += lastKnown.get(vid) || 0
+    }
+    result.push({ date, views: dayTotal })
+  }
+
+  return result
 }
 
 function pctChange(now: number, prev: number) {
