@@ -326,7 +326,7 @@ async function getDailyData(
 }
 
 // view_snapshots stores CUMULATIVE view_count per video per day
-// daily views = total_views_today - total_views_yesterday (the delta)
+// daily views = for each video, diff consecutive day view_counts, then sum all deltas
 // Only counts views from top-10-per-keyword ranked videos
 async function getDailyViewDeltas(
   campaignId: string | null,
@@ -339,26 +339,35 @@ async function getDailyViewDeltas(
   const { data } = await q
   if (!data || data.length === 0) return []
 
-  // Sum view_counts per day, but ONLY for top-10 ranked videos
-  const dayTotals = new Map<string, number>()
+  // Group snapshots by video_id → { date → view_count }
+  const videoSnapshots = new Map<string, Map<string, number>>()
   for (const row of data as any[]) {
     if (!top10VideoIds.has(row.video_id)) continue
     const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
-    dayTotals.set(dateStr, (dayTotals.get(dateStr) || 0) + (row.view_count || 0))
+    if (!videoSnapshots.has(row.video_id)) videoSnapshots.set(row.video_id, new Map())
+    videoSnapshots.get(row.video_id)!.set(dateStr, row.view_count || 0)
   }
 
-  const sortedDates = Array.from(dayTotals.keys()).sort()
-  if (sortedDates.length === 0) return []
+  // Collect all dates across all videos
+  const allDates = new Set<string>()
+  for (const snaps of videoSnapshots.values()) {
+    for (const d of snaps.keys()) allDates.add(d)
+  }
+  const sortedDates = Array.from(allDates).sort()
+  if (sortedDates.length <= 1) return []
 
-  // First day: use raw total as baseline (no previous day to diff against)
+  // For each date (skip first), sum per-video deltas
   const result: { date: string; views: number }[] = []
-  result.push({ date: sortedDates[0], views: dayTotals.get(sortedDates[0]) || 0 })
-
   for (let i = 1; i < sortedDates.length; i++) {
-    const prev = dayTotals.get(sortedDates[i - 1]) || 0
-    const curr = dayTotals.get(sortedDates[i]) || 0
-    const delta = curr - prev
-    result.push({ date: sortedDates[i], views: Math.max(0, delta) })
+    const prevDate = sortedDates[i - 1]
+    const currDate = sortedDates[i]
+    let totalDelta = 0
+    for (const snaps of videoSnapshots.values()) {
+      const prev = snaps.get(prevDate) || 0
+      const curr = snaps.get(currDate) || 0
+      if (curr > prev) totalDelta += curr - prev
+    }
+    result.push({ date: currDate, views: totalDelta })
   }
 
   return result
