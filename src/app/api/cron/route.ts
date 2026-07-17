@@ -45,7 +45,7 @@ async function handleCron(req: NextRequest) {
 
 async function runDailyViewsChunked(req: NextRequest) {
   const offset = parseInt(req.nextUrl.searchParams.get('offset') ?? '0', 10)
-  const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '15', 10), 25)
+  const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '12', 10), 25)
   const campaignId = req.nextUrl.searchParams.get('campaign_id') ?? undefined
 
   // Step 1: Build the full video list (cache it between chunks via system_metadata)
