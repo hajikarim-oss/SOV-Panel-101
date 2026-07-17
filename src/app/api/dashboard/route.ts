@@ -33,7 +33,7 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
 
   // ── Phase 1: All lightweight queries in parallel ──
   const [kwRes, cvRes, kvRes, ksRes, btRes, cbRes, vsTodayRes, vs1dRes, vs7dRes, vs30dRes, sjRes, cvNewRes] = await Promise.all([
-    supabase.from('keywords').select('id, text, language, classification_type').eq('campaign_id', cid).eq('status', 'active'),
+    supabase.from('keywords').select('id, text, language, category, type').eq('campaign_id', cid).eq('status', 'active'),
     supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid),
     supabase.from('keyword_videos').select('video_id, rank, keyword_id').eq('campaign_id', cid),
     supabase.from('keyword_shorts').select('video_id, rank, keyword_id').eq('campaign_id', cid),
