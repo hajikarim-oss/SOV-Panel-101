@@ -665,7 +665,7 @@ export default function ControlPage() {
                           setViewRefreshProgress('Starting…')
                           try {
                             let offset = 0
-                            const limit = 12
+                            const limit = 10
                             let totalUpdated = 0
                             let totalProcessed = 0
                             let chunkNum = 0
