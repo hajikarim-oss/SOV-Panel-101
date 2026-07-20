@@ -217,7 +217,7 @@ export default function MultiKeywordPage() {
             style={{ cursor: 'pointer', padding: '6px 12px' }}
           >
             <option value="">All Channels</option>
-            {channels.map(c => (
+            {channels.map((c: string) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
@@ -246,7 +246,7 @@ export default function MultiKeywordPage() {
             <Hash size={14} /> Common Terminology Across Multi-Ranking Videos
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {commonTerms.map(term => (
+            {commonTerms.map((term: string) => (
               <span key={term} className="badge badge-blue" style={{ fontSize: 11 }}>{term}</span>
             ))}
           </div>
@@ -276,7 +276,7 @@ export default function MultiKeywordPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.map((video, i) => (
+                {data.map((video: MultiVideo, i: number) => (
                   <tr key={video.youtube_id}>
                     <td style={{ textAlign: 'center' }}>
                       <div style={{

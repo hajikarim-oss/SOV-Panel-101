@@ -87,13 +87,13 @@ export default function KeywordsTab() {
   }
 
   const filtered = useMemo(() => {
-    let result = keywords.filter(kw => {
+    let result = keywords.filter((kw: any) => {
       if (search && !kw.text.toLowerCase().includes(search.toLowerCase())) return false
       if (filterType !== 'all' && kw.category !== filterType) return false
       if (filterLang !== 'all' && kw.language !== filterLang) return false
       return true
     })
-    result.sort((a, b) => {
+    result.sort((a: any, b: any) => {
       let cmp = 0
       switch (sortKey) {
         case 'name': cmp = a.text.localeCompare(b.text); break
@@ -106,11 +106,11 @@ export default function KeywordsTab() {
     return result
   }, [keywords, search, filterType, filterLang, sortKey, sortAsc])
 
-  const distinctLangs = useMemo(() => [...new Set(keywords.map(k => k.language).filter(Boolean))].sort(), [keywords])
+  const distinctLangs = useMemo(() => [...new Set(keywords.map((k: any) => k.language).filter(Boolean))].sort() as string[], [keywords])
   const stats = useMemo(() => ({
-    total: keywords.length, active: keywords.filter(k => k.status === 'active').length,
-    paused: keywords.filter(k => k.status === 'paused').length,
-    totalVideos: keywords.reduce((s, k) => s + (k.long_form_count || 0) + (k.short_form_count || 0), 0),
+    total: keywords.length, active: keywords.filter((k: any) => k.status === 'active').length,
+    paused: keywords.filter((k: any) => k.status === 'paused').length,
+    totalVideos: keywords.reduce((s: number, k: any) => s + (k.long_form_count || 0) + (k.short_form_count || 0), 0),
   }), [keywords])
 
   const handleSort = (key: SortKey) => { if (sortKey === key) setSortAsc(v => !v); else { setSortKey(key); setSortAsc(true) } }
@@ -180,7 +180,7 @@ export default function KeywordsTab() {
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           {/* Header */}
           <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 90px 80px 80px 80px 100px 80px', padding: '10px 14px', background: 'var(--bg-elevated)', borderBottom: '1px solid var(--border-1)', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.8px', alignItems: 'center' }}>
-            <div><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={() => setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map(k => k.id)))} style={{ cursor: 'pointer' }} /></div>
+            <div><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={() => setSelected(selected.size === filtered.length ? new Set() : new Set(filtered.map((k: any) => k.id)))} style={{ cursor: 'pointer' }} /></div>
             <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => handleSort('name')}>Keyword <SortIcon col="name" /></div>
             <div>Type</div><div>Language</div>
             <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }} onClick={() => handleSort('videos')}>Videos <SortIcon col="videos" /></div>
@@ -189,7 +189,7 @@ export default function KeywordsTab() {
             <div style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => handleSort('status')}>Status <SortIcon col="status" /></div>
           </div>
           {/* Rows */}
-          {filtered.map((kw, i) => (
+          {filtered.map((kw: any, i: number) => (
             <div key={kw.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr 90px 80px 80px 80px 100px 80px', padding: '10px 14px', borderBottom: i < filtered.length - 1 ? '1px solid var(--border-1)' : 'none', fontSize: 12, alignItems: 'center', background: selected.has(kw.id) ? 'var(--blue-dim)' : 'transparent' }}
               onMouseEnter={e => { if (!selected.has(kw.id)) e.currentTarget.style.background = 'var(--bg-hover)' }}
               onMouseLeave={e => { if (!selected.has(kw.id)) e.currentTarget.style.background = selected.has(kw.id) ? 'var(--blue-dim)' : 'transparent' }}>

@@ -77,7 +77,7 @@ export default function BrandGrowthPage() {
 
   const handleExport = () => {
     const headers = 'Brand,Current Value,Previous Value,Growth %,Videos Tracked'
-    const rows = data.map(b => `"${b.brand_name}",${b.currentValue},${b.previousValue},${b.growthPercent}%,${b.video_count}`)
+    const rows = data.map((b: any) => `"${b.brand_name}",${b.currentValue},${b.previousValue},${b.growthPercent}%,${b.video_count}`)
     const blob = new Blob([headers + '\n' + rows.join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url; a.download = `brand_growth_${metric}.csv`; a.click()

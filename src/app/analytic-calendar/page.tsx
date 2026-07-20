@@ -109,7 +109,7 @@ export default function AnalyticCalendarPage() {
     for (let i = 0; i < firstDay; i++) grid.push(null)
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      const dayData = days.find(day => day.date === dateStr)
+      const dayData = days.find((day: DayData) => day.date === dateStr)
       grid.push(dayData || { date: dateStr, views: 0, newVideos: 0, keywordsAdded: 0, scrapeJobs: 0, scrapeResults: 0, rankings: [], topBrands: [] })
     }
     return grid
@@ -117,7 +117,7 @@ export default function AnalyticCalendarPage() {
 
   const maxViewsDay = useMemo(() => {
     if (!days.length) return 0
-    return Math.max(...days.map(d => d.views))
+    return Math.max(...days.map((d: DayData) => d.views))
   }, [days])
 
   const today = new Date().toISOString().split('T')[0]
@@ -167,7 +167,7 @@ export default function AnalyticCalendarPage() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => {
-            const csv = days.map(d => `${d.date},${d.views},${d.newVideos},${d.keywordsAdded},${d.scrapeJobs}`).join('\n')
+            const csv = days.map((d: DayData) => `${d.date},${d.views},${d.newVideos},${d.keywordsAdded},${d.scrapeJobs}`).join('\n')
             const header = 'Date,Views,New Videos,Keywords Added,Scrape Jobs\n'
             const blob = new Blob([header + csv], { type: 'text/csv' })
             const url = URL.createObjectURL(blob)

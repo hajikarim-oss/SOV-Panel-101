@@ -72,9 +72,9 @@ export default function TrendsTab() {
 
   const enrichedData = useMemo(() => {
     if (!showAvg) return data
-    return data.map((d, i) => {
+    return data.map((d: any, i: number) => {
       const row = { ...d }
-      for (const b of activeBrands) { const w = data.slice(Math.max(0, i - 2), i + 1); row[`${b}_avg`] = Math.round((w.reduce((s, x) => s + (x[b] ?? 0), 0) / w.length) * 10) / 10 }
+      for (const b of activeBrands) { const w = data.slice(Math.max(0, i - 2), i + 1); row[`${b}_avg`] = Math.round((w.reduce((s: number, x: any) => s + (x[b] ?? 0), 0) / w.length) * 10) / 10 }
       return row
     })
   }, [data, showAvg, activeBrands])
@@ -82,8 +82,8 @@ export default function TrendsTab() {
   const brandStats = useMemo(() => computeBrandStats(data, brands), [data, brands])
 
   const handleExport = () => {
-    const headers = ['Date', ...brands]; const rows = data.map(d => [d.date, ...brands.map(b => String(d[b] ?? 0))])
-    const blob = new Blob([headers.join(',') + '\n' + rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' })
+    const headers = ['Date', ...brands]; const rows = data.map((d: any) => [d.date, ...brands.map((b: string) => String(d[b] ?? 0))])
+    const blob = new Blob([headers.join(',') + '\n' + rows.map((r: any[]) => r.join(',')).join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'sov_trend.csv'; a.click()
   }
 
@@ -113,7 +113,7 @@ export default function TrendsTab() {
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {brands.map(b => { const on = activeBrands.includes(b); const c = brandColor(b)
+        {brands.map((b: string) => { const on = activeBrands.includes(b); const c = brandColor(b)
           return <button key={b} onClick={() => toggleBrand(b)} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6, border: `1.5px solid ${on ? c : 'var(--border-2)'}`, background: on ? `${c}10` : '#fff', color: on ? c : 'var(--text-muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: on ? c : 'var(--border-2)' }} />{b}</button> })}
       </div>

@@ -48,7 +48,7 @@ export default function DroppedPage() {
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
 
-  const filtered = data.filter(v =>
+  const filtered = data.filter((v: DroppedVideo) =>
     !search.trim() ||
     v.title.toLowerCase().includes(search.toLowerCase()) ||
     v.channel_name.toLowerCase().includes(search.toLowerCase())
@@ -149,7 +149,7 @@ export default function DroppedPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(video => (
+                {filtered.map((video: DroppedVideo) => (
                   <tr key={`${video.youtube_id}-${video.last_rank}`}>
                     <td style={{ maxWidth: 320 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -188,7 +188,7 @@ export default function DroppedPage() {
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                         {(video.brands ?? []).length > 0 ? (
-                          (video.brands ?? []).map((b, bi) => (
+                          (video.brands ?? []).map((b: string, bi: number) => (
                             <span key={b} style={{
                               fontSize: 10, padding: '2px 7px', borderRadius: 5, fontWeight: 700,
                               background: `${COLORS[bi % COLORS.length]}15`,
@@ -215,7 +215,7 @@ export default function DroppedPage() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 200 }}>
-                        {video.keywords_appeared.slice(0, 4).map(k => (
+                        {video.keywords_appeared.slice(0, 4).map((k: string) => (
                           <span key={k} style={{
                             fontSize: 9.5, padding: '2px 6px', borderRadius: 4,
                             background: '#F1F5F9', border: '1px solid #E2E8F0', color: '#475569', fontWeight: 500,

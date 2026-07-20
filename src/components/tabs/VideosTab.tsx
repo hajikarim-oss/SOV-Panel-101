@@ -139,7 +139,7 @@ export default function VideosTab() {
   // Fetch daily gain when videos change
   useEffect(() => {
     if (activeCampaignId && videos.length > 0) {
-      const ids = videos.map(v => v.id).filter(Boolean)
+      const ids = videos.map((v: any) => v.id).filter(Boolean)
       fetchDailyGain(ids, activeCampaignId)
     }
   }, [videos, activeCampaignId, fetchDailyGain])
@@ -194,14 +194,14 @@ export default function VideosTab() {
 
   const handleExport = () => {
     const headers = 'Title,Channel,Views,Daily Gain,Rank,Keywords,Brand Tags,Duration,Published,Ownership'
-    const rows = videos.map(v => [
+    const rows = videos.map((v: any) => [
       `"${(v.title || '').replace(/"/g, '""')}"`, `"${v.channel_name || ''}"`,
       String(v.view_count || 0), String(gainMap[v.id]?.daily_gain ?? ''),
       String(v.best_rank || ''), String(v.keyword_count || 0),
       `"${(v.brands || v.tags || []).join(', ')}"`, fmtDuration(v.duration),
       v.published_at || '', v.is_ours ? 'Yes' : 'No',
     ])
-    const blob = new Blob([headers + '\n' + rows.map(r => r.join(',')).join('\n')], { type: 'text/csv' })
+    const blob = new Blob([headers + '\n' + rows.map((r: any[]) => r.join(',')).join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'campaign_videos.csv'; a.click()
   }
 
@@ -289,7 +289,7 @@ export default function VideosTab() {
             <div className="section-title" style={{ marginBottom: 5 }}>Channel</div>
             <select className="input" value={channelFilter} onChange={e => { setChannelFilter(e.target.value); setPage(1) }}>
               <option value="all">All Channels</option>
-              {channels.map(c => <option key={c} value={c}>{c}</option>)}
+              {channels.map((c: string) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
           <div>
@@ -316,7 +316,7 @@ export default function VideosTab() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          {videos.map((v, i) => {
+          {videos.map((v: any, i: number) => {
             const tags = v.brands || v.tags || []
             const gain = gainMap[v.id]
             const isEditing = editingTags === v.youtube_id
