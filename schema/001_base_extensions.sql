@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS keyword_shorts (
 -- view_snapshots (will be converted to hypertable)
 CREATE TABLE IF NOT EXISTS view_snapshots (
   video_id UUID REFERENCES videos(id) ON DELETE CASCADE,
+  campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE,
   snapshot_date DATE NOT NULL,
   view_count BIGINT NOT NULL DEFAULT 0,
   like_count BIGINT,

@@ -16,13 +16,18 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseServic
 // Executes raw SQL using the exec_sql stored procedure (must be created in Supabase)
 // Parameters are inlined with proper escaping for security
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function escapeParam(val: any): string {
   if (val === null || val === undefined) return 'NULL'
   if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE'
   if (typeof val === 'number') return String(val)
   if (val instanceof Date) return `'${val.toISOString()}'`
   if (typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "''")}'`
-  return `'${String(val).replace(/'/g, "''")}'`
+  const s = String(val).replace(/'/g, "''")
+  // Cast UUID strings to avoid "operator does not exist: uuid = text" in PostgreSQL
+  if (UUID_RE.test(val)) return `'${s}'::uuid`
+  return `'${s}'`
 }
 
 function inlineParams(sql: string, params: any[]): string {
@@ -34,7 +39,9 @@ function inlineParams(sql: string, params: any[]): string {
       const arrItems = val.map(v => {
         if (v === null || v === undefined) return 'NULL'
         if (typeof v === 'number') return String(v)
-        return `'${String(v).replace(/'/g, "''")}'`
+        const s = String(v).replace(/'/g, "''")
+        if (UUID_RE.test(v)) return `'${s}'::uuid`
+        return `'${s}'`
       })
       result = result.replace(new RegExp(`\\$${i + 1}\\b`, 'g'), `ARRAY[${arrItems.join(',')}]`)
     } else {
@@ -137,7 +144,9 @@ function escapeVal(val: any): string {
   if (val instanceof Date) return `'${val.toISOString()}'`
   if (Array.isArray(val)) return `'${JSON.stringify(val).replace(/'/g, "''")}'::jsonb`
   if (typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "''")}'`
-  return `'${String(val).replace(/'/g, "''")}'`
+  const s = String(val).replace(/'/g, "''")
+  if (UUID_RE.test(val)) return `'${s}'::uuid`
+  return `'${s}'`
 }
 
 /**

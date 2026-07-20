@@ -80,26 +80,13 @@ WITH latest_snapshots AS (
 ),
 video_brand_views AS (
   SELECT
-    kv.campaign_id,
-    unnest(v.tags) AS brand_name,
+    bt.campaign_id,
+    bt.brand_name,
     ls.view_count
-  FROM keyword_videos kv
-  JOIN videos v ON v.id = kv.video_id
-  JOIN latest_snapshots ls ON ls.video_id = kv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
-
-  UNION ALL
-
-  SELECT
-    tv.campaign_id,
-    unnest(v.tags) AS brand_name,
-    ls.view_count
-  FROM tracked_videos tv
-  JOIN videos v ON v.id = tv.video_id
-  JOIN latest_snapshots ls ON ls.video_id = tv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
+  FROM brand_tags bt
+  JOIN videos v ON v.id = bt.video_id
+  JOIN latest_snapshots ls ON ls.video_id = bt.video_id
+  WHERE v.is_deleted = FALSE
 )
 SELECT
   campaign_id,
@@ -124,12 +111,12 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS brand_freq_sov_mv AS
 WITH video_brand_freq AS (
   SELECT
     kv.campaign_id,
-    unnest(v.tags) AS brand_name,
+    bt.brand_name,
     kv.search_appearance_count
   FROM keyword_videos kv
   JOIN videos v ON v.id = kv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
+  JOIN brand_tags bt ON bt.video_id = kv.video_id AND bt.campaign_id = kv.campaign_id
+  WHERE v.is_deleted = FALSE
 )
 SELECT
   campaign_id,

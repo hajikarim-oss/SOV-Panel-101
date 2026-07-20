@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { supabase, queryAll } from '@/lib/supabase'
 import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
 
 export async function GET() {
@@ -14,31 +14,36 @@ export async function GET() {
 }
 
 async function fetchCampaigns() {
-    const { data: campaigns, error } = await supabase
-      .from('campaigns')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Campaigns GET error:', error)
-      return { error: error.message, campaigns: [] }
-    }
-
-    const enriched = await Promise.all((campaigns || []).map(async (c: any) => {
-      const [kwRes, brRes, sjRes] = await Promise.all([
-        supabase.from('keywords').select('id').eq('campaign_id', c.id).eq('status', 'active'),
-        supabase.from('campaign_brands').select('id').eq('campaign_id', c.id),
-        supabase.from('scrape_jobs').select('created_at').eq('campaign_id', c.id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
-      ])
-      return {
-        ...c,
-        keyword_count: (kwRes.data || []).length,
-        brand_count: (brRes.data || []).length,
-        last_scraped: sjRes.data?.created_at || null,
-      }
-    }))
-
+  try {
+    const enriched = await queryAll<any>(`
+      SELECT
+        c.id, c.name, c.category, c.sub_category, c.description, c.status, c.created_at,
+        COALESCE(k.cnt, 0)::INT as keyword_count,
+        COALESCE(b.cnt, 0)::INT as brand_count,
+        s.last_scraped
+      FROM campaigns c
+      LEFT JOIN (
+        SELECT campaign_id, COUNT(*)::INT as cnt
+        FROM keywords WHERE status = 'active'
+        GROUP BY campaign_id
+      ) k ON k.campaign_id = c.id
+      LEFT JOIN (
+        SELECT campaign_id, COUNT(*)::INT as cnt
+        FROM campaign_brands
+        GROUP BY campaign_id
+      ) b ON b.campaign_id = c.id
+      LEFT JOIN (
+        SELECT DISTINCT ON (campaign_id) campaign_id, created_at as last_scraped
+        FROM scrape_jobs
+        ORDER BY campaign_id, created_at DESC
+      ) s ON s.campaign_id = c.id
+      ORDER BY c.created_at DESC
+    `)
     return { campaigns: enriched }
+  } catch (err: any) {
+    console.error('Campaigns GET SQL error:', err)
+    return { error: err.message, campaigns: [] }
+  }
 }
 
 export async function POST(req: NextRequest) {

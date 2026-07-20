@@ -57,7 +57,9 @@ function pgArray(items: string[]): string {
 }
 
 function isShortForm(durationSec: number): boolean {
-  return durationSec > 0 && durationSec < 240
+  // YouTube Shorts are officially <= 60 seconds.
+  // Videos with durationSec=0 are unknown (detail fetch failed) — do NOT classify as either format.
+  return durationSec > 0 && durationSec <= 60
 }
 
 function getWeekStart(): string {
@@ -322,10 +324,14 @@ export async function saveScrapeResults(
     `SELECT name FROM campaign_brands WHERE campaign_id = $1`, [campaignId]
   ).then(rows => rows.map(r => r.name))
 
-  // 2. Split into long/short form
+  // 2. Split into long/short form (top 10 each)
+  // Only videos with known duration (duration_sec > 0) are format-classified.
+  // Videos with duration_sec=0 (unknown, detail fetch failed) are added to the
+  // campaign pool but NOT ranked in either format table.
   const longForm: YouTubeVideo[] = []
   const shortForm: YouTubeVideo[] = []
   for (const v of videos) {
+    if (v.duration_sec === 0) continue  // unknown duration — skip format ranking
     if (isShortForm(v.duration_sec)) {
       if (shortForm.length < 10) shortForm.push(v)
     } else if (longForm.length < 10) {

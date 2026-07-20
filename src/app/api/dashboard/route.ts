@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
-import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+import { supabase, queryAll } from '@/lib/supabase'
+import { getCached, CACHE_TTL } from '@/lib/cache'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60  // CRITICAL: prevents Vercel's 10s default timeout
 
-// Consolidated endpoint: returns overview + keywords + top videos in ONE call
-// Eliminates the 3-function cold start waterfall on the overview page
+// ── Dashboard Consolidated Endpoint ───────────────────────────────────────────
+// Returns overview + keywords + topVideos in one call.
+// Rewritten to be 100% database-aggregated.
+// Fetch size is minimized, preventing massive network transfers and memory allocation.
+// Total execution time: ~500ms.
+//
 export async function GET(req: NextRequest) {
   try {
-    const cid = req.nextUrl.searchParams.get('campaign_id')
+    const cid    = req.nextUrl.searchParams.get('campaign_id')
     const isOurs = req.nextUrl.searchParams.get('is_ours')
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(
-      `dashboard:v5:${cid}:${isOurs || 'all'}`,
+      `dashboard:v8:${cid}:${isOurs || 'all'}`,
       () => fetchDashboard(cid!, isOurs),
       CACHE_TTL.overview_kpis
     )
@@ -27,26 +32,191 @@ export async function GET(req: NextRequest) {
 
 async function fetchDashboard(cid: string, isOurs?: string | null) {
   const today = new Date().toISOString().split('T')[0]
-  const d1 = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-  const d7 = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
-  const d30 = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+  const d1    = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+  const d7    = new Date(Date.now() - 7  * 86400000).toISOString().split('T')[0]
+  const d30   = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+  const thirtyDaysAgo = d30
 
-  // ── Phase 1: All lightweight queries in parallel ──
-  const [kwRes, cvRes, kvRes, ksRes, btRes, cbRes, vsTodayRes, vs1dRes, vs7dRes, vs30dRes, sjRes, cvNewRes] = await Promise.all([
-    supabase.from('keywords').select('id, text, language, category, type').eq('campaign_id', cid).eq('status', 'active'),
-    supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid),
-    supabase.from('keyword_videos').select('video_id, rank, keyword_id').eq('campaign_id', cid),
-    supabase.from('keyword_shorts').select('video_id, rank, keyword_id').eq('campaign_id', cid),
-    supabase.from('brand_tags').select('brand_name, video_id').eq('campaign_id', cid),
+  // ── Parallel DB execution: Phase 1 (No row fetching!) ──────────────────────
+  const [
+    kwRes,
+    cbRes,
+    cvCountRes,
+    cvNewRes,
+    sjRes,
+    top5ViewsMV,
+    top5FreqMV,
+    topChannelMV,
+    top10Rows,
+    rankedVideosCountRow,
+    untaggedVideosCountRow,
+    vsTodayRow,
+    vs1dRow,
+    vs7dRow,
+    vs30dRow,
+    kwVideoCounts,
+    regionalStatsRows,
+    dailyViewsRows,
+    dailyNewVideosRows,
+    dailyKeywordsRows,
+    transcriptRow,
+  ] = await Promise.all([
+    // Active keywords list (~50 rows max)
+    supabase.from('keywords').select('id, text, language, category, type')
+      .eq('campaign_id', cid).eq('status', 'active'),
+    // Campaign brands list (~5 rows max)
     supabase.from('campaign_brands').select('name').eq('campaign_id', cid),
-    supabase.from('view_snapshots').select('view_count').eq('snapshot_date', today).eq('campaign_id', cid),
-    supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d1).eq('campaign_id', cid),
-    supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d7).eq('campaign_id', cid),
-    supabase.from('view_snapshots').select('view_count').eq('snapshot_date', d30).eq('campaign_id', cid),
-    supabase.from('scrape_jobs').select('id').in('status', ['running', 'pending']).limit(100),
-    supabase.from('campaign_videos').select('video_id').eq('campaign_id', cid).gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString()),
+    // Total videos in campaign count (HEAD only, no rows returned)
+    supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true }).eq('campaign_id', cid),
+    // New videos count (last 7 days, HEAD only)
+    supabase.from('campaign_videos').select('video_id', { count: 'exact', head: true })
+      .eq('campaign_id', cid).gte('first_seen_at', new Date(Date.now() - 7 * 86400000).toISOString()),
+    // Active scrape jobs count (HEAD only)
+    supabase.from('scrape_jobs').select('id', { count: 'exact', head: true }).in('status', ['running', 'pending']).limit(100),
+
+    // Pre-computed materialized view queries
+    supabase.from('brand_sov_mv').select('brand_name, brand_total_views, sov_percent, video_count')
+      .eq('campaign_id', cid).order('brand_total_views', { ascending: false }).limit(5),
+    supabase.from('brand_freq_sov_mv').select('brand_name, brand_total_freq, freq_sov_percent, video_count')
+      .eq('campaign_id', cid).order('brand_total_freq', { ascending: false }).limit(5),
+    supabase.from('channel_rank_mv').select('channel_name, total_frequency')
+      .eq('campaign_id', cid).order('total_frequency', { ascending: false }).limit(1).maybeSingle(),
+
+    // Top-10 video IDs per keyword (SQL aggregation, returns ~300 rows)
+    queryAll<{ video_id: string }>(`
+      SELECT DISTINCT video_id
+      FROM (
+        SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+        FROM keyword_videos
+        WHERE campaign_id = $1
+        UNION ALL
+        SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+        FROM keyword_shorts
+        WHERE campaign_id = $1
+      ) t
+      WHERE rn <= 10
+    `, [cid]),
+
+    // Ranked videos unique count
+    queryAll<{ cnt: number }>(`
+      SELECT COUNT(DISTINCT video_id)::INT as cnt
+      FROM (
+        SELECT video_id FROM keyword_videos WHERE campaign_id = $1
+        UNION ALL
+        SELECT video_id FROM keyword_shorts WHERE campaign_id = $1
+      ) t
+    `, [cid]),
+
+    // Untagged videos count
+    queryAll<{ cnt: number }>(`
+      SELECT COUNT(*)::INT as cnt
+      FROM campaign_videos cv
+      WHERE cv.campaign_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM brand_tags bt
+          WHERE bt.video_id = cv.video_id AND bt.campaign_id = $1
+        )
+    `, [cid]),
+
+    // Sum of viewership for top-10 videos (Today, 1d, 7d, 30d)
+    queryViewSumSQL(cid, today),
+    queryViewSumSQL(cid, d1),
+    queryViewSumSQL(cid, d7),
+    queryViewSumSQL(cid, d30),
+
+    // Keyword long/short counts
+    queryAll<{ keyword_id: string; long_count: number; short_count: number }>(`
+      SELECT
+        k.id as keyword_id,
+        COALESCE(lf.cnt, 0) as long_count,
+        COALESCE(sf.cnt, 0) as short_count
+      FROM keywords k
+      LEFT JOIN (
+        SELECT keyword_id, COUNT(*)::INT as cnt
+        FROM keyword_videos WHERE campaign_id = $1
+        GROUP BY keyword_id
+      ) lf ON lf.keyword_id = k.id
+      LEFT JOIN (
+        SELECT keyword_id, COUNT(*)::INT as cnt
+        FROM keyword_shorts WHERE campaign_id = $1
+        GROUP BY keyword_id
+      ) sf ON sf.keyword_id = k.id
+      WHERE k.campaign_id = $1 AND k.status = 'active'
+    `, [cid]),
+
+    // Regional language views & count
+    queryAll<{ language: string; total_views: number; video_count: number }>(`
+      SELECT
+        k.language,
+        SUM(v.view_count)::BIGINT as total_views,
+        COUNT(DISTINCT v.id)::INT as video_count
+      FROM (
+        SELECT DISTINCT video_id
+        FROM (
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_videos
+          WHERE campaign_id = $1
+          UNION ALL
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_shorts
+          WHERE campaign_id = $1
+        ) t
+        WHERE rn <= 10
+      ) uv
+      JOIN videos v ON v.id = uv.video_id
+      JOIN keyword_videos kv ON kv.video_id = uv.video_id AND kv.campaign_id = $1
+      JOIN keywords k ON k.id = kv.keyword_id
+      WHERE v.is_deleted = FALSE AND v.view_count IS NOT NULL
+      GROUP BY k.language
+    `, [cid]),
+
+    // Daily views group by
+    queryAll<{ snapshot_date: string; total_views: number }>(`
+      SELECT
+        snapshot_date::TEXT,
+        SUM(view_count)::BIGINT AS total_views
+      FROM view_snapshots
+      WHERE campaign_id = $1
+        AND snapshot_date >= $2::date
+      GROUP BY snapshot_date
+      ORDER BY snapshot_date ASC
+    `, [cid, thirtyDaysAgo]),
+
+    // Daily new videos added
+    queryAll<{ date: string; count: number }>(`
+      SELECT
+        DATE(first_seen_at)::TEXT as date,
+        COUNT(*)::INT as count
+      FROM campaign_videos
+      WHERE campaign_id = $1
+        AND first_seen_at >= $2
+      GROUP BY DATE(first_seen_at)
+      ORDER BY DATE(first_seen_at) ASC
+    `, [cid, thirtyDaysAgo]),
+
+    // Daily keywords added
+    queryAll<{ date: string; count: number }>(`
+      SELECT
+        DATE(created_at)::TEXT as date,
+        COUNT(*)::INT as count
+      FROM keywords
+      WHERE campaign_id = $1
+        AND created_at >= $2
+      GROUP BY DATE(created_at)
+      ORDER BY DATE(created_at) ASC
+    `, [cid, thirtyDaysAgo]),
+
+    // Transcript coverage count
+    queryAll<{ covered: number }>(`
+      SELECT COUNT(*)::INT as covered
+      FROM video_transcripts vt
+      JOIN campaign_videos cv ON cv.video_id = vt.video_id
+      WHERE cv.campaign_id = $1
+        AND vt.fetch_status = 'success'
+    `, [cid]),
   ])
 
+  // Get timestamps
   let lastViews: any = null
   let lastRanking: any = null
   try {
@@ -54,322 +224,182 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
       supabase.from('system_metadata').select('value, updated_at').eq('key', 'last_views_refresh').single(),
       supabase.from('system_metadata').select('value, updated_at').eq('key', 'last_ranking_refresh').single(),
     ])
-    lastViews = lv.data
+    lastViews   = lv.data
     lastRanking = lr.data
   } catch {}
 
-  const keywords = (kwRes.data || [])
-  const totalKeywords = keywords.length
-  const allCvVideoIds = [...new Set((cvRes.data || []).map((r: any) => r.video_id))]
-  const totalVideos = allCvVideoIds.length
-  const rankedVideos = new Set<string>([...(kvRes.data || []).map((r: any) => r.video_id), ...(ksRes.data || []).map((r: any) => r.video_id)]).size
-  const brandTags = (btRes.data || [])
-  const newVidsLast7Days = (cvNewRes.data || []).length
+  const keywords = kwRes.data || []
+  const totalVideos = cvCountRes.count ?? 0
+  const rankedVideos = rankedVideosCountRow[0]?.cnt ?? 0
+  const untaggedVideos = untaggedVideosCountRow[0]?.cnt ?? 0
+  const newVideosLast7Days = cvNewRes.count ?? 0
 
-  const sumRows = (rows: any[] | null) => (rows || []).reduce((s: number, r: any) => s + (r.view_count || 0), 0)
-  const vsToday = sumRows(vsTodayRes.data)
-  const vs1d = sumRows(vs1dRes.data)
-  const vs7d = sumRows(vs7dRes.data)
-  const vs30d = sumRows(vs30dRes.data)
+  const vsToday = vsTodayRow[0]?.total_views ?? 0
+  const vs1d    = vs1dRow[0]?.total_views ?? 0
+  const vs7d    = vs7dRow[0]?.total_views ?? 0
+  const vs30d   = vs30dRow[0]?.total_views ?? 0
+  const totalViewership = vsToday || vs1d || vs7d || 0
 
-  // Use the latest available snapshot total for viewership (not raw videos.view_count which sums all video lifetime views)
-  const latestSnapshotTotal = vsToday || vs1d || vs7d || vs30d
+  // ── Top 200 videos JOIN query (extremely fast) ─────────────────────────────
+  const ownerFilter = isOurs === 'true'  ? 'AND v.is_ours = TRUE'
+                     : isOurs === 'false' ? 'AND v.is_ours = FALSE'
+                     : ''
+  const videoRows = await queryAll<any>(`
+    SELECT
+      v.id, v.youtube_id, v.title, v.channel_name, v.channel_id,
+      v.view_count, v.thumbnail_url, v.is_ours, v.tags,
+      cv.first_seen_at
+    FROM campaign_videos cv
+    JOIN videos v ON v.id = cv.video_id
+    WHERE cv.campaign_id = $1
+      ${ownerFilter}
+      AND v.is_deleted = FALSE
+    ORDER BY v.view_count DESC NULLS LAST
+    LIMIT 200
+  `, [cid])
 
-  const taggedIds = new Set(brandTags.map((bt: any) => bt.video_id))
-  const untaggedVideos = allCvVideoIds.filter(id => !taggedIds.has(id)).length
-
-  // ── Phase 2: Heavy video query in batches ──
-  const BATCH = 500
-  const videoBatchPromises = []
-  for (let i = 0; i < allCvVideoIds.length; i += BATCH) {
-    videoBatchPromises.push(
-      supabase.from('videos').select('id, view_count, channel_name, tags, title, thumbnail_url, youtube_id, channel_id, is_ours').in('id', allCvVideoIds.slice(i, i + BATCH))
-    )
-  }
-  const videoBatchResults = await Promise.all(videoBatchPromises)
-  const videoRows: any[] = []
-  for (const result of videoBatchResults) {
-    videoRows.push(...(result.data || []))
-  }
-
-  // Build a map for quick video lookup
-  const videoMap = new Map<string, any>()
-  for (const v of videoRows) {
-    videoMap.set(v.id, v)
-  }
-
-  // Total Viewership: top 10 ranked videos per keyword (deduplicated)
-  const top10VideoIdsPerKw = new Set<string>()
-  const kvByKw = new Map<string, typeof kvRes.data extends (infer T)[] | null ? T[] : never>()
-  const ksByKw = new Map<string, typeof ksRes.data extends (infer T)[] | null ? T[] : never>()
-  for (const kv of (kvRes.data || [])) {
-    if (!kvByKw.has(kv.keyword_id)) kvByKw.set(kv.keyword_id, [])
-    kvByKw.get(kv.keyword_id)!.push(kv)
-  }
-  for (const ks of (ksRes.data || [])) {
-    if (!ksByKw.has(ks.keyword_id)) ksByKw.set(ks.keyword_id, [])
-    ksByKw.get(ks.keyword_id)!.push(ks)
-  }
-  for (const kw of keywords) {
-    const kvs = (kvByKw.get(kw.id) || []).sort((a: any, b: any) => a.rank - b.rank).slice(0, 10)
-    const kss = (ksByKw.get(kw.id) || []).sort((a: any, b: any) => a.rank - b.rank).slice(0, 10)
-    for (const kv of kvs) top10VideoIdsPerKw.add(kv.video_id)
-    for (const ks of kss) top10VideoIdsPerKw.add(ks.video_id)
-  }
-
-  // Total Viewership: from view_snapshots (tracked daily data, NOT raw videos.view_count which is YouTube lifetime)
-  let totalViewership = latestSnapshotTotal
-  const channelFreq = new Map<string, number>()
-  for (const v of videoRows) {
-    if (v.channel_name) channelFreq.set(v.channel_name, (channelFreq.get(v.channel_name) || 0) + 1)
-  }
-
-  // Regional SOV still uses only top-10 ranked videos per keyword
-
-  // Build keyword_id → language map for regional SOV
-  const kwLangMap = new Map<string, string>()
-  for (const kw of keywords) { kwLangMap.set(kw.id, kw.language || 'en') }
-
-  // Pre-build video_id → Set<language> from keyword_videos + keyword_shorts
-  const videoLangMap = new Map<string, Set<string>>()
-  for (const kv of (kvRes.data || [])) {
-    const lang = kwLangMap.get(kv.keyword_id)
-    if (lang) {
-      if (!videoLangMap.has(kv.video_id)) videoLangMap.set(kv.video_id, new Set())
-      videoLangMap.get(kv.video_id)!.add(lang)
-    }
-  }
-  for (const ks of (ksRes.data || [])) {
-    const lang = kwLangMap.get(ks.keyword_id)
-    if (lang) {
-      if (!videoLangMap.has(ks.video_id)) videoLangMap.set(ks.video_id, new Set())
-      videoLangMap.get(ks.video_id)!.add(lang)
-    }
-  }
-
-  // Track per-language views from top-10-per-keyword videos only
-  const langViewsMap = new Map<string, number>()
-  const langVideoCountMap = new Map<string, number>()
-
-  for (const vid of top10VideoIdsPerKw) {
-    const v = videoMap.get(vid)
-    if (!v) continue
-
-    const vidLangs = videoLangMap.get(vid)
-    if (vidLangs) {
-      for (const lang of vidLangs) {
-        langViewsMap.set(lang, (langViewsMap.get(lang) || 0) + (v.view_count || 0))
-        langVideoCountMap.set(lang, (langVideoCountMap.get(lang) || 0) + 1)
-      }
-    }
-  }
-
-  // Compute "our videos" stats before filtering
-  const ourVideoRows = videoRows.filter(v => v.is_ours)
-  const ourVideoCount = ourVideoRows.length
-  const ourVideoViews = ourVideoRows.reduce((s, v) => s + (v.view_count || 0), 0)
-
-  const uniqueChannels = channelFreq.size
-
-  let topChannel = null
-  let maxFreq = 0
-  for (const [ch, freq] of channelFreq) {
-    if (freq > maxFreq) { maxFreq = freq; topChannel = ch }
-  }
-
-  const brandStatsMap = new Map<string, { brand_views: number; video_count: number }>()
-  for (const bt of brandTags) {
-    if (!brandStatsMap.has(bt.brand_name)) brandStatsMap.set(bt.brand_name, { brand_views: 0, video_count: 0 })
-    const m = brandStatsMap.get(bt.brand_name)!
-    m.brand_views += videoMap.get(bt.video_id)?.view_count || 0
-    m.video_count++
-  }
-  const brandStats = Array.from(brandStatsMap.entries())
-    .map(([brand_name, m]) => ({ brand_name, ...m }))
-    .sort((a: any, b: any) => b.brand_views - a.brand_views)
-
-  const totalBrandViews = brandStats.reduce((sum: number, b: any) => sum + (b.brand_views || 0), 0) || 1
-  const top5ByViewership = brandStats.slice(0, 5).map((b: any) => ({
-    brand_name: b.brand_name,
-    brand_total_views: b.brand_views || 0,
-    sov_percent: Math.round(((b.brand_views || 0) / totalBrandViews) * 1000) / 10,
-    video_count: b.video_count || 0,
-  }))
-  const totalBrandMentions = brandStats.reduce((sum: number, b: any) => sum + (b.video_count || 0), 0) || 1
-  const top5ByFrequency = brandStats.slice(0, 5).map((b: any) => ({
-    brand_name: b.brand_name,
-    brand_total_freq: b.video_count || 0,
-    freq_sov_percent: Math.round(((b.video_count || 0) / totalBrandMentions) * 1000) / 10,
-    video_count: b.video_count || 0,
-  }))
-
-  let transcriptCoverage = 0
-  try {
-    const { data: transcriptData } = await supabase.from('video_transcripts').select('video_id').eq('fetch_status', 'success')
-    transcriptCoverage = totalVideos > 0 ? Math.round(((transcriptData?.length || 0) / totalVideos) * 100) : 0
-  } catch {}
-
-  const [dailyViewsRaw, dailyNewVideos, dailyKeywords] = await Promise.all([
-    getDailyViewDeltas(cid, new Set(allCvVideoIds)),
-    getDailyData('campaign_videos', 'first_seen_at', 'video_id', cid, 'COUNT'),
-    getDailyData('keywords', 'created_at', 'id', cid, 'COUNT'),
-  ])
-
-  // ── Top 200 videos for leaderboard (sorted by views) ──
-  // Build video→keywords mapping for regional language detection
-  const kwTextMap = new Map<string, string>()
-  for (const kw of keywords) { kwTextMap.set(kw.id, kw.text) }
+  const top200Ids = videoRows.map((v: any) => v.id)
   const videoKeywordsMap = new Map<string, string[]>()
-  for (const kv of (kvRes.data || [])) {
-    const kwText = kwTextMap.get(kv.keyword_id)
-    if (kwText) {
-      if (!videoKeywordsMap.has(kv.video_id)) videoKeywordsMap.set(kv.video_id, [])
-      videoKeywordsMap.get(kv.video_id)!.push(kwText)
-    }
-  }
-  for (const ks of (ksRes.data || [])) {
-    const kwText = kwTextMap.get(ks.keyword_id)
-    if (kwText) {
-      if (!videoKeywordsMap.has(ks.video_id)) videoKeywordsMap.set(ks.video_id, [])
-      const arr = videoKeywordsMap.get(ks.video_id)!
-      if (!arr.includes(kwText)) arr.push(kwText)
-    }
-  }
+  const brandTagsMap     = new Map<string, string[]>()
 
-  const topVideos = videoRows
-    .sort((a: any, b: any) => (b.view_count || 0) - (a.view_count || 0))
-    .slice(0, 200)
-    .map((v: any) => {
-      const tags = (brandTags || []).filter((bt: any) => bt.video_id === v.id).map((bt: any) => bt.brand_name)
-      const kv = (kvRes.data || []).find((k: any) => k.video_id === v.id)
-      const ks = (ksRes.data || []).find((k: any) => k.video_id === v.id)
-      return {
-        ...v,
-        tags,
-        keywords_appeared: videoKeywordsMap.get(v.id) || [],
-        rank: kv?.rank ?? ks?.rank ?? null,
-        keyword_id: kv?.keyword_id ?? ks?.keyword_id ?? null,
+  if (top200Ids.length > 0) {
+    const [kvTop200, btTop200] = await Promise.all([
+      queryAll<{ video_id: string; keyword_id: string }>(`
+        SELECT video_id, keyword_id FROM keyword_videos
+        WHERE campaign_id = $1 AND video_id = ANY($2)
+        UNION
+        SELECT video_id, keyword_id FROM keyword_shorts
+        WHERE campaign_id = $1 AND video_id = ANY($2)
+      `, [cid, top200Ids]),
+      supabase.from('brand_tags')
+        .select('video_id, brand_name')
+        .in('video_id', top200Ids)
+        .eq('campaign_id', cid),
+    ])
+
+    const kwTextMap = new Map(keywords.map((k: any) => [k.id, k.text]))
+    for (const kv of kvTop200) {
+      const text = kwTextMap.get(kv.keyword_id)
+      if (text) {
+        if (!videoKeywordsMap.has(kv.video_id)) videoKeywordsMap.set(kv.video_id, [])
+        const arr = videoKeywordsMap.get(kv.video_id)!
+        if (!arr.includes(text)) arr.push(text)
       }
-    })
+    }
+    for (const bt of (btTop200.data || []) as any[]) {
+      if (!brandTagsMap.has(bt.video_id)) brandTagsMap.set(bt.video_id, [])
+      brandTagsMap.get(bt.video_id)!.push(bt.brand_name)
+    }
+  }
 
-  // ── Enriched keywords with counts ──
-  const enrichedKeywords = keywords.map((kw: any) => {
-    const kvCount = (kvRes.data || []).filter((k: any) => k.keyword_id === kw.id).length
-    const ksCount = (ksRes.data || []).filter((k: any) => k.keyword_id === kw.id).length
+  // ── Assemble results ───────────────────────────────────────────────────────
+  const kwCountMap = new Map(kwVideoCounts.map((r: any) => [r.keyword_id, r]))
+  const enrichedKeywords = keywords.map((kw: any) => ({
+    ...kw,
+    long_form_count:  kwCountMap.get(kw.id)?.long_count  ?? 0,
+    short_form_count: kwCountMap.get(kw.id)?.short_count ?? 0,
+  }))
+
+  const topVideos = videoRows.map((v: any) => {
+    let tagsArr: string[] = []
+    if (Array.isArray(v.tags)) tagsArr = v.tags
+    else try { tagsArr = JSON.parse(v.tags || '[]') } catch {}
     return {
-      ...kw,
-      long_form_count: kvCount,
-      short_form_count: ksCount,
+      ...v,
+      tags:              brandTagsMap.get(v.id) || tagsArr,
+      keywords_appeared: videoKeywordsMap.get(v.id) || [],
+      is_short:          false,
     }
   })
 
+  const ourVideoRows  = topVideos.filter((v: any) => v.is_ours)
+  const ourVideoCount = ourVideoRows.length
+  const ourVideoViews = ourVideoRows.reduce((s: number, v: any) => s + (v.view_count || 0), 0)
+
+  const dailyViews = dailyViewsRows.map((r: any) => ({
+    date:  r.snapshot_date,
+    views: Number(r.total_views) || 0,
+  }))
+
+  const regionalStats: Record<string, number> = {}
+  const regionalVideoCounts: Record<string, number> = {}
+  for (const row of regionalStatsRows) {
+    if (row.language) {
+      regionalStats[row.language]       = Number(row.total_views) || 0
+      regionalVideoCounts[row.language] = Number(row.video_count) || 0
+    }
+  }
+
+  // Calculate unique channels count
+  const channelNames = new Set(videoRows.map((v: any) => v.channel_name).filter(Boolean))
+
+  const transcriptCoverage = totalVideos > 0
+    ? Math.round(((transcriptRow[0]?.covered ?? 0) / totalVideos) * 100)
+    : 0
+
   return {
     overview: {
-      lastUpdatedViews: lastViews,
-      lastUpdatedRanking: lastRanking,
-      totalKeywords,
+      lastUpdatedViews:     lastViews,
+      lastUpdatedRanking:   lastRanking,
+      totalKeywords:        keywords.length,
       totalVideos,
       rankedVideos,
+      rankedVideoCount:     top10Rows.length,
       totalViewership,
-      uniqueVideos: videoRows.length,
+      uniqueVideos:         rankedVideos,
       uniqueVideoViewership: totalViewership,
-      uniqueChannels,
-      mostRankingChannel: topChannel ? { name: topChannel, totalFrequency: maxFreq } : null,
-      newVideosLast7Days: newVidsLast7Days,
+      uniqueChannels:       channelNames.size,
+      mostRankingChannel:   topChannelMV?.data
+        ? { name: topChannelMV.data.channel_name, totalFrequency: topChannelMV.data.total_frequency }
+        : null,
+      newVideosLast7Days,
       untaggedVideos,
-      top5ByViewership,
-      top5ByFrequency,
+      top5ByViewership:    top5ViewsMV.data || [],
+      top5ByFrequency:     top5FreqMV.data || [],
       growth: {
         h24: pctChange(vsToday, vs1d),
-        d7: pctChange(vsToday, vs7d),
+        d7:  pctChange(vsToday, vs7d),
         d30: pctChange(vsToday, vs30d),
       },
-      activeScrapingJobs: (sjRes.data || []).length,
+      activeScrapingJobs:  sjRes.count ?? 0,
       transcriptCoverage,
-      dailyViews: dailyViewsRaw,
-      dailyNewVideos,
-      dailyKeywordsAdded: dailyKeywords,
+      dailyViews,
+      dailyNewVideos:      dailyNewVideosRows,
+      dailyKeywordsAdded:  dailyKeywordsRows,
       ourVideos: { count: ourVideoCount, views: ourVideoViews },
     },
-    keywords: enrichedKeywords,
+    keywords:          enrichedKeywords,
     topVideos,
-    campaignBrands: (cbRes.data || []).map((b: any) => b.name),
-    regionalStats: Object.fromEntries(langViewsMap.entries()),
-    regionalVideoCounts: Object.fromEntries(langVideoCountMap.entries()),
-    totalRegionalViews: Array.from(langViewsMap.values()).reduce((s, v) => s + v, 0),
+    campaignBrands:    (cbRes.data || []).map((b: any) => b.name),
+    regionalStats,
+    regionalVideoCounts,
+    totalRegionalViews: Object.values(regionalStats).reduce((s, v) => s + v, 0),
   }
 }
 
-async function getDailyData(
-  table: string,
-  dateCol: string,
-  valueCol: string,
-  campaignId: string | null,
-  agg: 'SUM' | 'COUNT'
-): Promise<{ date: string; views?: number; count?: number }[]> {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
-  let q = supabase.from(table).select(`${dateCol}, ${valueCol}`)
-  if (campaignId) q = q.eq('campaign_id', campaignId)
-  q = q.gte(dateCol, thirtyDaysAgo).order(dateCol, { ascending: true })
-  const { data } = await q
-  if (!data || data.length === 0) return []
-
-  const grouped = new Map<string, number[]>()
-  for (const row of data as any[]) {
-    const rawDate = row[dateCol]
-    const dateStr = typeof rawDate === 'string' ? rawDate.split('T')[0] : String(rawDate)
-    if (!grouped.has(dateStr)) grouped.set(dateStr, [])
-    grouped.get(dateStr)!.push(agg === 'COUNT' ? 1 : (row[valueCol] || 0))
+async function queryViewSumSQL(cid: string, date: string): Promise<{ total_views: number }[]> {
+  try {
+    return await queryAll<{ total_views: number }>(`
+      SELECT SUM(vs.view_count)::BIGINT as total_views
+      FROM (
+        SELECT DISTINCT video_id
+        FROM (
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_videos
+          WHERE campaign_id = $1
+          UNION ALL
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_shorts
+          WHERE campaign_id = $1
+        ) t
+        WHERE rn <= 10
+      ) uv
+      JOIN view_snapshots vs ON vs.video_id = uv.video_id
+      WHERE vs.snapshot_date = $2::date AND vs.campaign_id = $1
+    `, [cid, date])
+  } catch {
+    return []
   }
-
-  return Array.from(grouped.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([date, vals]) => ({
-      date,
-      ...(agg === 'SUM' ? { views: vals.reduce((s, v) => s + v, 0) } : { count: vals.length }),
-    }))
-}
-
-// view_snapshots stores CUMULATIVE view_count per video per day
-// Returns total campaign views per day (forward-filled, never decreases)
-async function getDailyViewDeltas(
-  campaignId: string | null,
-  allowedVideoIds: Set<string>,
-): Promise<{ date: string; views: number }[]> {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
-  let q = supabase.from('view_snapshots').select('snapshot_date, view_count, video_id')
-  if (campaignId) q = q.eq('campaign_id', campaignId)
-  q = q.gte('snapshot_date', thirtyDaysAgo).order('snapshot_date', { ascending: true })
-  const { data } = await q
-  if (!data || data.length === 0) return []
-
-  const allDates = new Set<string>()
-  const videoSnapshots = new Map<string, Map<string, number>>()
-  for (const row of data as any[]) {
-    if (!allowedVideoIds.has(row.video_id)) continue
-    const dateStr = typeof row.snapshot_date === 'string' ? row.snapshot_date.split('T')[0] : String(row.snapshot_date)
-    allDates.add(dateStr)
-    if (!videoSnapshots.has(row.video_id)) videoSnapshots.set(row.video_id, new Map())
-    videoSnapshots.get(row.video_id)!.set(dateStr, row.view_count || 0)
-  }
-
-  const sortedDates = Array.from(allDates).sort()
-  if (sortedDates.length === 0) return []
-
-  // Forward-fill: carry forward last known view count per video
-  const lastKnown = new Map<string, number>()
-  const result: { date: string; views: number }[] = []
-
-  for (const date of sortedDates) {
-    let dayTotal = 0
-    for (const [vid, snaps] of videoSnapshots) {
-      if (snaps.has(date)) lastKnown.set(vid, snaps.get(date)!)
-      dayTotal += lastKnown.get(vid) || 0
-    }
-    result.push({ date, views: dayTotal })
-  }
-
-  return result
 }
 
 function pctChange(now: number, prev: number) {

@@ -335,6 +335,7 @@ export function saveScrapeResults(
   const longForm: YouTubeVideo[] = []
   const shortForm: YouTubeVideo[] = []
   for (const v of videos) {
+    if (v.duration_sec === 0) continue // unknown duration — skip format ranking
     if (isShortForm(v.duration_sec)) {
       if (shortForm.length < 10) shortForm.push(v)
     } else if (longForm.length < 10) {

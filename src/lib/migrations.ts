@@ -109,6 +109,14 @@ function getMigrationFiles(): Migration[] {
     sql: indexes,
   })
 
+  // Fix scripts: add missing columns and fix exec_sql return type
+  const fixSchema = readSchemaFile('VERIFY_AND_FIX_SCHEMA.sql')
+  migrations.push({
+    id: '004_fix_schema',
+    name: '004_verify_and_fix_schema',
+    sql: fixSchema,
+  })
+
   return migrations
 }
 

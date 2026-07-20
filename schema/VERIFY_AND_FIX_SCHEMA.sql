@@ -12,6 +12,7 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS comment_count BIGINT DEFAULT 0;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration TEXT;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_sec INTEGER DEFAULT 0;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_ours BOOLEAN DEFAULT FALSE;
 
 -- 3. Ensure unique constraints
 DO $$ BEGIN
@@ -55,6 +56,7 @@ ALTER TABLE video_transcripts ADD COLUMN IF NOT EXISTS youtube_id TEXT;
 ALTER TABLE video_transcripts ADD COLUMN IF NOT EXISTS fetch_status TEXT DEFAULT 'pending';
 
 -- 8. Ensure view_snapshots has all columns
+ALTER TABLE view_snapshots ADD COLUMN IF NOT EXISTS campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE;
 ALTER TABLE view_snapshots ADD COLUMN IF NOT EXISTS like_count BIGINT;
 ALTER TABLE view_snapshots ADD COLUMN IF NOT EXISTS comment_count BIGINT;
 ALTER TABLE view_snapshots ADD COLUMN IF NOT EXISTS daily_delta BIGINT DEFAULT 0;

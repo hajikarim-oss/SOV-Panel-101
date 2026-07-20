@@ -23,6 +23,11 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 
+DO $$ BEGIN
+  ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_ours BOOLEAN DEFAULT FALSE;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
 -- 3. Add unique constraint on brand_tags if not exists
 DO $$ BEGIN
   ALTER TABLE brand_tags ADD CONSTRAINT brand_tags_video_brand_campaign_unique UNIQUE (video_id, brand_name, campaign_id);

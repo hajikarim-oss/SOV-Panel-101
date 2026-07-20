@@ -375,32 +375,62 @@ export default function OverviewPage() {
 
   const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
     if (!campId) return
-    const cacheKey = `overview:v5:${campId}:${isOurs || 'all'}`
-    const cached = getClientCache<any>(cacheKey)
-    if (cached) {
+    // v7 cache key — bumped to flush any stale/corrupted v6 entries from localStorage
+    const ckFull = `overview:v7:${campId}:${isOurs || 'all'}`
+    const cached = getClientCache<any>(ckFull)
+    if (cached && cached.overview) {
       setOverview(cached.overview)
-      setKeywords(cached.keywords)
-      setVideos(cached.videos)
+      setKeywords(cached.keywords ?? [])
+      setVideos(cached.videos ?? [])
       setRegionalApiStats(cached.regionalStats || {})
       setRegionalApiCounts(cached.regionalCounts || {})
       setTotalRegionalViews(cached.totalRegionalViews || 0)
-      setHasData(!cached.overview.error && cached.overview.totalVideos > 0)
+      setHasData(!cached.overview?.error && (cached.overview?.totalVideos ?? 0) > 0)
       setLoading(false)
       return
     }
+
     setLoading(true)
+    const isOursParam = isOurs && isOurs !== 'all' ? `&is_ours=${isOurs}` : ''
+
+    // ── Phase 1: Fast KPIs (~300ms) ─────────────────────────────────────────
+    // Fetches KPI cards from the lightweight endpoint first so users see numbers
+    // almost instantly while the full dataset loads in the background.
     try {
-      const isOursParam = isOurs && isOurs !== 'all' ? `&is_ours=${isOurs}` : ''
+      const kpisRes = await fetch(`/api/dashboard/kpis?campaign_id=${campId}`)
+      if (kpisRes.ok) {
+        const kpis = await kpisRes.json()
+        if (kpis && !kpis.error) {
+          setOverview(kpis)
+          setHasData((kpis.totalVideos ?? 0) > 0)
+          setLoading(false)  // Show KPI cards immediately — don't wait for full data
+        }
+      }
+    } catch { /* KPIs fetch failed — full fetch will handle it */ }
+
+    // ── Phase 2: Full dashboard data (charts + videos, 1–5s) ────────────────
+    try {
       const res = await fetch(`/api/dashboard?campaign_id=${campId}${isOursParam}`)
       const d = await res.json()
-      setOverview(d.overview)
-      setKeywords(d.keywords ?? [])
-      setVideos(d.topVideos ?? [])
-      setRegionalApiStats(d.regionalStats || {})
-      setRegionalApiCounts(d.regionalVideoCounts || {})
-      setTotalRegionalViews(d.totalRegionalViews || 0)
-      setHasData(!d.overview?.error && d.overview?.totalVideos > 0)
-      setClientCache(cacheKey, { overview: d.overview, keywords: d.keywords ?? [], videos: d.topVideos ?? [], regionalStats: d.regionalStats || {}, regionalCounts: d.regionalVideoCounts || {}, totalRegionalViews: d.totalRegionalViews || 0 })
+      // Guard: only update state if we got a valid response
+      if (d && d.overview) {
+        setOverview(d.overview)
+        setKeywords(d.keywords ?? [])
+        setVideos(d.topVideos ?? [])
+        setRegionalApiStats(d.regionalStats || {})
+        setRegionalApiCounts(d.regionalVideoCounts || {})
+        setTotalRegionalViews(d.totalRegionalViews || 0)
+        setHasData(!d.overview?.error && (d.overview?.totalVideos ?? 0) > 0)
+        // Only cache valid responses — never cache error/undefined overview
+        setClientCache(ckFull, {
+          overview: d.overview,
+          keywords: d.keywords ?? [],
+          videos: d.topVideos ?? [],
+          regionalStats: d.regionalStats || {},
+          regionalCounts: d.regionalVideoCounts || {},
+          totalRegionalViews: d.totalRegionalViews || 0,
+        })
+      }
     } catch { setHasData(false) }
     finally { setLoading(false) }
   }, [])
@@ -908,7 +938,7 @@ export default function OverviewPage() {
                 value={fmt(overview?.uniqueVideos ?? 0)}
                 icon={Video}
                 color="#06B6D4"
-                info="Deduplicated count of distinct videos found across all keywords."
+                info="Deduplicated count of unique videos that successfully rank in the top 10."
               />
               <MetricCard
                 label="Total Viewership"
@@ -1092,7 +1122,7 @@ export default function OverviewPage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 800, color: '#0F172A', marginBottom: 2 }}>Views Tracker</div>
-                  <div style={{ fontSize: 11.5, color: '#94A3B8' }}>Daily cumulative views across all {overview?.totalVideos || 0} campaign videos</div>
+                  <div style={{ fontSize: 11.5, color: '#94A3B8' }}>Daily cumulative views across all {overview?.rankedVideoCount ?? overview?.totalVideos ?? 0} ranked campaign videos</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   {/* View mode toggle */}
@@ -1172,7 +1202,8 @@ export default function OverviewPage() {
                 const prev = data.length >= 2 ? data[data.length - 2]?.views || 0 : 0
                 const delta = latest - prev
                 const pctChange = prev > 0 ? ((delta / prev) * 100).toFixed(1) : '0'
-                const isLine = data.length > 7
+                // Always prefer line chart (like image 3 design) when there are >= 2 data points
+                const isLine = data.length >= 2
                 const minVal = Math.min(...data.map(t => t.views))
                 const maxVal = Math.max(...data.map(t => t.views))
                 const range = maxVal - minVal || 1
@@ -1201,7 +1232,9 @@ export default function OverviewPage() {
                       {[
                         { label: 'Total Views', value: fmtIndian(latest), color: '#0F172A', mono: true },
                         { label: chartViewMode === 'daily_gain' ? 'Period Gain' : 'Day-over-Day', value: `${delta >= 0 ? '+' : ''}${pctChange}%`, sub: `(${delta >= 0 ? '+' : ''}${fmt(delta)})`, color: delta >= 0 ? '#059669' : '#DC2626', mono: true },
-                        { label: 'Campaign Videos', value: (overview?.totalVideos || 0).toLocaleString(), color: '#1A73E8', mono: true },
+                        // rankedVideoCount = unique top-10-per-keyword videos (deduplicated across both formats).
+                        // totalVideos = ALL videos in campaign_videos. These differ intentionally.
+                        { label: 'Ranked Videos', value: (overview?.rankedVideoCount ?? overview?.totalVideos ?? 0).toLocaleString(), color: '#1A73E8', mono: true },
                         { label: 'Avg Daily Gain', value: fmt(avgGain), color: '#8B5CF6', mono: true },
                       ].map((s, i) => (
                         <div key={i} style={{

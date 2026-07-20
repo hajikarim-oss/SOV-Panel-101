@@ -1,5 +1,40 @@
 import { Redis } from '@upstash/redis'
 
+// ── L1: In-Process Memory Cache (0ms, 30s TTL) ────────────────────────────────
+// Lives inside the Node.js process — zero network latency.
+// Prevents hammering Redis for repeated requests within the same function instance.
+interface MemEntry { data: unknown; expiresAt: number }
+const memCache = new Map<string, MemEntry>()
+const MEM_TTL_MS = 30_000  // 30 seconds
+const MEM_MAX_SIZE = 150   // cap to prevent OOM
+
+function getL1<T>(key: string): T | null {
+  const entry = memCache.get(key)
+  if (!entry) return null
+  if (Date.now() > entry.expiresAt) {
+    memCache.delete(key)
+    return null
+  }
+  return entry.data as T
+}
+
+function setL1(key: string, data: unknown, ttlMs = MEM_TTL_MS) {
+  // Evict oldest entry if at capacity
+  if (memCache.size >= MEM_MAX_SIZE) {
+    const firstKey = memCache.keys().next().value
+    if (firstKey) memCache.delete(firstKey)
+  }
+  memCache.set(key, { data, expiresAt: Date.now() + ttlMs })
+}
+
+export function invalidateL1(pattern?: string) {
+  if (!pattern) { memCache.clear(); return }
+  for (const key of memCache.keys()) {
+    if (key.includes(pattern)) memCache.delete(key)
+  }
+}
+
+// ── L2: Redis Cache (~10ms) ───────────────────────────────────────────────────
 let redisInstance: Redis | null = null
 try {
   const url = process.env.UPSTASH_REDIS_REST_URL
@@ -7,7 +42,7 @@ try {
     redisInstance = Redis.fromEnv()
   }
 } catch (e) {
-  console.warn("Upstash Redis initialization warning (expected during build/CI):", e)
+  console.warn('Upstash Redis initialization warning (expected during build/CI):', e)
 }
 
 export const redis = redisInstance
@@ -32,7 +67,7 @@ export const CACHE_TTL = {
   views_snapshot: 60,
 } as const
 
-// ── In-flight Deduplication ───────────────────────────────────────────────────
+// ── In-flight Deduplication (prevents thundering herd on cold start) ──────────
 const inflight = new Map<string, Promise<unknown>>()
 
 async function dedupedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -42,25 +77,33 @@ async function dedupedFetch<T>(key: string, fetcher: () => Promise<T>): Promise<
   return p
 }
 
-// ── Cache Wrapper (stale-while-revalidate + deduplication) ────────────────────
+// ── Main Cache Wrapper: L1 → L2 → Fetcher ────────────────────────────────────
 export async function getCached<T>(
   key: string,
   fetcher: () => Promise<T>,
   ttl: number
 ): Promise<T> {
+  // L1: memory hit (0ms — fastest possible)
+  const l1 = getL1<T>(key)
+  if (l1 !== null) return l1
+
   return dedupedFetch(key, async () => {
-    // 1. Try Redis
+    // L2: Redis hit (~10ms)
     try {
       if (redis) {
         const cached = await redis.get<T>(key)
-        if (cached !== null) return cached
+        if (cached !== null) {
+          setL1(key, cached) // promote to L1
+          return cached
+        }
       }
     } catch {}
 
-    // 2. Cache miss — fetch fresh data
+    // L3: Fetch fresh from database
     const fresh = await fetcher()
 
-    // 3. Write to Redis (fire-and-forget)
+    // Write to L1 + L2 simultaneously (fire-and-forget for Redis)
+    setL1(key, fresh)
     try {
       if (redis) {
         redis.setex(key, ttl, JSON.stringify(fresh)).catch(() => {})
@@ -71,9 +114,31 @@ export async function getCached<T>(
   })
 }
 
-// ── Client-side cache (localStorage) ──────────────────────────────────────────
+// ── Stale-While-Revalidate: return L1 immediately, refresh in background ──────
+export async function getCachedSWR<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttl: number
+): Promise<T> {
+  const l1 = getL1<T>(key)
+  if (l1 !== null) {
+    // Serve stale data immediately, refresh in background
+    Promise.resolve().then(() =>
+      fetcher()
+        .then(fresh => {
+          setL1(key, fresh)
+          if (redis) redis.setex(key, ttl, JSON.stringify(fresh)).catch(() => {})
+        })
+        .catch(() => {})
+    )
+    return l1
+  }
+  return getCached(key, fetcher, ttl)
+}
+
+// ── Client-side cache (localStorage, 5 min TTL) ───────────────────────────────
 const CLIENT_CACHE_PREFIX = 'sov_cache:'
-const CLIENT_CACHE_TTL = 5 * 60 * 1000 // 5 min client-side
+const CLIENT_CACHE_TTL = 5 * 60 * 1000
 
 export function getClientCache<T>(key: string): T | null {
   try {
@@ -97,14 +162,14 @@ export function setClientCache(key: string, data: unknown) {
 export function clearClientCache(pattern?: string) {
   try {
     const prefix = CLIENT_CACHE_PREFIX + (pattern || '')
-    const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix))
-    keys.forEach(k => localStorage.removeItem(k))
+    Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k))
   } catch {}
 }
 
 // ── Cache Key Builder ─────────────────────────────────────────────────────────
 export const cacheKey = {
   overview: (campaignId: string) => `campaign:${campaignId}:overview`,
+  kpis: (campaignId: string) => `campaign:${campaignId}:kpis:v1`,
   brandSov: (campaignId: string) => `campaign:${campaignId}:brands:sov`,
   freqSov: (campaignId: string) => `campaign:${campaignId}:brands:freq-sov`,
   leaderboard: (campaignId: string, sort: string, page: number, tab: string) =>
@@ -133,6 +198,7 @@ export const cacheKey = {
 }
 
 export async function invalidateCampaign(campaignId: string) {
+  invalidateL1(`campaign:${campaignId}`)
   try {
     if (redis) {
       const keys = await redis.keys(`campaign:${campaignId}:*`)

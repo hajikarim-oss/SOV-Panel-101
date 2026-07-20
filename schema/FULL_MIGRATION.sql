@@ -361,26 +361,13 @@ WITH latest_snapshots AS (
 ),
 video_brand_views AS (
   SELECT
-    kv.campaign_id,
-    unnest(v.tags) AS brand_name,
+    bt.campaign_id,
+    bt.brand_name,
     ls.view_count
-  FROM keyword_videos kv
-  JOIN videos v ON v.id = kv.video_id
-  JOIN latest_snapshots ls ON ls.video_id = kv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
-
-  UNION ALL
-
-  SELECT
-    tv.campaign_id,
-    unnest(v.tags) AS brand_name,
-    ls.view_count
-  FROM tracked_videos tv
-  JOIN videos v ON v.id = tv.video_id
-  JOIN latest_snapshots ls ON ls.video_id = tv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
+  FROM brand_tags bt
+  JOIN videos v ON v.id = bt.video_id
+  JOIN latest_snapshots ls ON ls.video_id = bt.video_id
+  WHERE v.is_deleted = FALSE
 )
 SELECT
   campaign_id,
@@ -404,12 +391,12 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS brand_freq_sov_mv AS
 WITH video_brand_freq AS (
   SELECT
     kv.campaign_id,
-    unnest(v.tags) AS brand_name,
+    bt.brand_name,
     kv.search_appearance_count
   FROM keyword_videos kv
   JOIN videos v ON v.id = kv.video_id
-  WHERE v.tags IS NOT NULL AND array_length(v.tags, 1) > 0
-  AND v.is_deleted = FALSE
+  JOIN brand_tags bt ON bt.video_id = kv.video_id AND bt.campaign_id = kv.campaign_id
+  WHERE v.is_deleted = FALSE
 )
 SELECT
   campaign_id,
@@ -477,13 +464,27 @@ $$;
 
 -- Function to execute arbitrary SQL (for migrations)
 CREATE OR REPLACE FUNCTION exec_sql(sql TEXT)
-RETURNS void
+RETURNS SETOF JSON
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
+DECLARE
+  trimmed TEXT := UPPER(TRIM(sql));
+  result RECORD;
 BEGIN
-  EXECUTE sql;
+  IF trimmed LIKE 'SELECT %' OR trimmed LIKE 'WITH %' THEN
+    FOR result IN EXECUTE sql LOOP
+      RETURN NEXT row_to_json(result);
+    END LOOP;
+  ELSE
+    EXECUTE sql;
+  END IF;
 END;
 $$;
+
+GRANT EXECUTE ON FUNCTION exec_sql(TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION exec_sql(TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION exec_sql(TEXT) TO authenticated;
 
 -- Function to increment quota usage
 CREATE OR REPLACE FUNCTION increment_quota_usage(p_units INTEGER, p_account TEXT)

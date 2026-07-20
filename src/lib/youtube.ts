@@ -43,7 +43,9 @@ export function parseDurationSec(duration: string | null): number {
 }
 
 export function isShortForm(durationSec: number): boolean {
-  return durationSec > 0 && durationSec < 240
+  // YouTube Shorts are officially <= 60 seconds.
+  // Videos with durationSec=0 are unknown (detail fetch failed) — do NOT classify as either format.
+  return durationSec > 0 && durationSec <= 60
 }
 
 // ── Key Rotation — decrypts key before use ─────────────────────────
