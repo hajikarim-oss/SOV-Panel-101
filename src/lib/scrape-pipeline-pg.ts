@@ -460,16 +460,24 @@ export async function runDailyViewUpdatePg(campaignId?: string): Promise<{
   batches: number
 }> {
   // 1. Get all videos to update — 1 query (batch SELECT)
-  const whereClause = campaignId
-    ? `WHERE cv.campaign_id = '${campaignId}' AND v.is_deleted = FALSE`
-    : `WHERE v.is_deleted = FALSE`
+  let rows: { youtube_id: string; video_id: string; campaign_id: string }[]
 
-  const rows = await queryAll<{ youtube_id: string; video_id: string; campaign_id: string }>(
-    `SELECT v.youtube_id, v.id as video_id, cv.campaign_id
-     FROM campaign_videos cv
-     INNER JOIN videos v ON v.id = cv.video_id
-     ${whereClause}`
-  )
+  if (campaignId) {
+    rows = await queryAll<{ youtube_id: string; video_id: string; campaign_id: string }>(
+      `SELECT v.youtube_id, v.id as video_id, cv.campaign_id
+       FROM campaign_videos cv
+       INNER JOIN videos v ON v.id = cv.video_id
+       WHERE cv.campaign_id = $1 AND v.is_deleted = FALSE`,
+      [campaignId]
+    )
+  } else {
+    rows = await queryAll<{ youtube_id: string; video_id: string; campaign_id: string }>(
+      `SELECT v.youtube_id, v.id as video_id, cv.campaign_id
+       FROM campaign_videos cv
+       INNER JOIN videos v ON v.id = cv.video_id
+       WHERE v.is_deleted = FALSE`
+    )
+  }
 
   const today = new Date().toISOString().split('T')[0]
   let quotaCost = 0
@@ -537,9 +545,11 @@ export async function runDailyViewUpdatePg(campaignId?: string): Promise<{
   }
 
   // 5. Update system metadata — 1 query
+  const now = new Date().toISOString()
   await queryAll(
-    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_views_refresh', '${new Date().toISOString()}', '${new Date().toISOString()}')
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`
+    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_views_refresh', $1, $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+    [now]
   )
 
   return { updated, deleted, quota_cost: quotaCost, batches }
@@ -550,13 +560,18 @@ export async function runWeeklyKeywordRefreshPg(campaignId?: string): Promise<{
   failed: number
   total_quota: number
 }> {
-  const whereClause = campaignId
-    ? `WHERE status = 'active' AND campaign_id = '${campaignId}'`
-    : `WHERE status = 'active'`
+  let keywords: { id: string; text: string; campaign_id: string }[]
 
-  const keywords = await queryAll<{ id: string; text: string; campaign_id: string }>(
-    `SELECT id, text, campaign_id FROM keywords ${whereClause} ORDER BY last_scraped_at ASC NULLS FIRST`
-  )
+  if (campaignId) {
+    keywords = await queryAll<{ id: string; text: string; campaign_id: string }>(
+      `SELECT id, text, campaign_id FROM keywords WHERE status = 'active' AND campaign_id = $1 ORDER BY last_scraped_at ASC NULLS FIRST`,
+      [campaignId]
+    )
+  } else {
+    keywords = await queryAll<{ id: string; text: string; campaign_id: string }>(
+      `SELECT id, text, campaign_id FROM keywords WHERE status = 'active' ORDER BY last_scraped_at ASC NULLS FIRST`
+    )
+  }
 
   let totalQuota = 0
   let failed = 0
@@ -572,8 +587,9 @@ export async function runWeeklyKeywordRefreshPg(campaignId?: string): Promise<{
 
   const now = new Date().toISOString()
   await queryAll(
-    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_weekly_refresh', '${now}', '${now}')
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`
+    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_weekly_refresh', $1, $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+    [now]
   )
 
   return { keywords_processed: keywords.length - failed, failed, total_quota: totalQuota }
@@ -592,18 +608,28 @@ export async function runBrandAnalysisPg(campaignId?: string, limit: number = 10
       ).then(rows => rows.map(r => r.name))
     : []
 
-  // 2. Get videos to analyze — 1 query
-  const whereClause = campaignId
-    ? `WHERE v.is_deleted = FALSE AND v.id IN (SELECT video_id FROM campaign_videos WHERE campaign_id = '${campaignId}')`
-    : `WHERE v.is_deleted = FALSE`
+  // 2. Get videos to analyze — 1 query (include channel_name + description for analyst prompt)
+  let videos: { id: string; youtube_id: string; title: string; channel_name: string; description: string }[]
 
-  const videos = await queryAll<{ id: string; youtube_id: string; title: string }>(
-    `SELECT v.id, v.youtube_id, v.title FROM videos v
-     ${whereClause}
-     AND v.id NOT IN (SELECT video_id FROM brand_analysis)
-     ORDER BY v.view_count DESC
-     LIMIT ${limit}`
-  )
+  if (campaignId) {
+    videos = await queryAll<{ id: string; youtube_id: string; title: string; channel_name: string; description: string }>(
+      `SELECT v.id, v.youtube_id, v.title, v.channel_name, v.description FROM videos v
+       WHERE v.is_deleted = FALSE AND v.id IN (SELECT video_id FROM campaign_videos WHERE campaign_id = $1)
+       AND v.id NOT IN (SELECT video_id FROM brand_analysis)
+       ORDER BY v.view_count DESC
+       LIMIT $2`,
+      [campaignId, limit]
+    )
+  } else {
+    videos = await queryAll<{ id: string; youtube_id: string; title: string; channel_name: string; description: string }>(
+      `SELECT v.id, v.youtube_id, v.title, v.channel_name, v.description FROM videos v
+       WHERE v.is_deleted = FALSE
+       AND v.id NOT IN (SELECT video_id FROM brand_analysis)
+       ORDER BY v.view_count DESC
+       LIMIT $1`,
+      [limit]
+    )
+  }
 
   let analyzed = 0
   let noTranscript = 0
@@ -641,7 +667,13 @@ export async function runBrandAnalysisPg(campaignId?: string, limit: number = 10
         )
       }
 
-      const detections = await analyzeBrandsFromTranscript(transcriptText, video.title, brandNames)
+      const detections = await analyzeBrandsFromTranscript(
+        transcriptText,
+        video.title,
+        brandNames,
+        video.channel_name || '',
+        video.description || ''
+      )
 
       // 5. Batch insert brand analysis — 1 query
       if (detections.length > 0) {
@@ -691,8 +723,9 @@ export async function runBrandAnalysisPg(campaignId?: string, limit: number = 10
   // 8. Update system metadata — 1 query
   const now = new Date().toISOString()
   await queryAll(
-    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_brand_analysis', '${now}', '${now}')
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`
+    `INSERT INTO system_metadata (key, value, updated_at) VALUES ('last_brand_analysis', $1, $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+    [now]
   )
 
   return { analyzed, skipped: videos.length - analyzed - noTranscript, no_transcript: noTranscript, brands_found: brandsFound }

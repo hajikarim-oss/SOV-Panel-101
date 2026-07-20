@@ -96,7 +96,13 @@ export async function POST(req: NextRequest) {
       }
 
       // Analyze with AI
-      const detections = await analyzeBrandsFromTranscript(transcript.text, video.title, campaignBrands)
+      const detections = await analyzeBrandsFromTranscript(
+        transcript.text,
+        video.title,
+        campaignBrands,
+        video.channel_name || '',
+        video.description || ''
+      )
 
       // Store results
       if (force) {

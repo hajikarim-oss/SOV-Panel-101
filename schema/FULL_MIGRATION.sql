@@ -560,7 +560,10 @@ CREATE OR REPLACE FUNCTION get_growth_rates(p_campaign_id UUID)
 RETURNS TABLE(
   h24 NUMERIC,
   d7 NUMERIC,
-  d30 NUMERIC
+  d30 NUMERIC,
+  h24_gain BIGINT,
+  d7_gain BIGINT,
+  d30_gain BIGINT
 )
 LANGUAGE plpgsql
 AS $$
@@ -594,24 +597,27 @@ BEGIN
   WHERE campaign_id = p_campaign_id
   AND snapshot_date = CURRENT_DATE - INTERVAL '30 days';
 
-  -- Calculate growth rates
+  -- Calculate growth rates and gains
   h24 := CASE
     WHEN yesterday_views > 0
     THEN ROUND(((today_views - yesterday_views)::NUMERIC / yesterday_views) * 100, 1)
     ELSE 0
   END;
+  h24_gain := today_views - yesterday_views;
 
   d7 := CASE
     WHEN week_ago_views > 0
     THEN ROUND(((today_views - week_ago_views)::NUMERIC / week_ago_views) * 100, 1)
     ELSE 0
   END;
+  d7_gain := today_views - week_ago_views;
 
   d30 := CASE
     WHEN month_ago_views > 0
     THEN ROUND(((today_views - month_ago_views)::NUMERIC / month_ago_views) * 100, 1)
     ELSE 0
   END;
+  d30_gain := today_views - month_ago_views;
 
   RETURN NEXT;
 END;

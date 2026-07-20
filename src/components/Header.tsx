@@ -150,13 +150,6 @@ export default function Header() {
     }}>
       {/* Left side: Branding / Title context */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8,
-          background: 'var(--blue-dim)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center', color: 'var(--blue)'
-        }}>
-          <Sparkles size={16} />
-        </div>
         <div>
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', color: 'var(--text-muted)' }}>Workspace</span>
           <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginTop: -2 }}>

@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Eye, BarChart2, RefreshCw, ChevronUp, ChevronDown, Loader2, Play,
   ArrowUpRight, Zap, Video, Search, Award, Layers, Users, AlertCircle,
-  Hash, Target, Star, Filter, Info, X, Download, MapPin, Tv, TrendingUp, Activity
+  Hash, Target, Star, Filter, Info, X, Download, MapPin, Tv, TrendingUp, Activity,
+  Bell, Settings
 } from 'lucide-react'
 import {
   Area, AreaChart, BarChart, Bar, PieChart, Pie, Cell, Tooltip, Legend,
@@ -17,8 +18,25 @@ import { useCampaignStore } from '@/lib/store'
 import { getClientCache, setClientCache } from '@/lib/cache'
 import { languageRegions } from '@/lib/india-regions'
 import IndiaMap from '@/components/IndiaMap'
+import VideosTab from '@/components/tabs/VideosTab'
+import KeywordsTab from '@/components/tabs/KeywordsTab'
+import TrendsTab from '@/components/tabs/TrendsTab'
+import GrowthTab from '@/components/tabs/GrowthTab'
+import AlertsTab from '@/components/tabs/AlertsTab'
+import SettingsTab from '@/components/tabs/SettingsTab'
 
-const C = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#14B8A6', '#F97316', '#6366F1']
+const C = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return C[Math.abs(hash) % C.length]
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 function fmt(n: number | null | undefined): string {
@@ -52,7 +70,7 @@ function fmtIndian(n: number | null | undefined): string {
 }
 
 function formatGrowth(v: number | null | undefined): string {
-  if (v === null || v === undefined || isNaN(v) || v === 0) return 'N/A'
+  if (v === null || v === undefined || isNaN(v)) return 'N/A'
   const prefix = v >= 0 ? '+' : ''
   return `${prefix}${v.toFixed(1)}%`
 }
@@ -74,44 +92,41 @@ function MetricCard({
     <div style={{
       background: '#fff',
       borderRadius: 12,
-      padding: '14px 16px',
+      padding: '12px 14px',
       border: '1px solid #F1F5F9',
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'space-between',
-      minHeight: 110,
+      height: '100%',
       transition: 'all 0.2s',
       boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
     }}>
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <Icon size={14} style={{ color }} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+          <Icon size={12} style={{ color, flexShrink: 0 }} />
           <span style={{
-            fontSize: 10,
+            fontSize: 9.5,
             fontWeight: 700,
             color: '#64748B',
             textTransform: 'uppercase',
-            letterSpacing: '0.5px'
+            letterSpacing: '0.3px',
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
           }}>
             {label}
           </span>
         </div>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          color: '#94A3B8',
-          cursor: 'help',
-          marginBottom: 8
-        }} title={info}>
-          <Info size={11} />
+        <div style={{ color: '#CBD5E1', cursor: 'help', flexShrink: 0, marginLeft: 4 }} title={info}>
+          <Info size={10} />
         </div>
       </div>
       <div style={{
-        fontSize: 20,
+        fontSize: 22,
         fontWeight: 800,
         color: '#0F172A',
         fontFamily: "'JetBrains Mono', monospace",
-        lineHeight: 1.1
+        lineHeight: 1.1,
+        marginTop: 8,
       }}>
         {value}
       </div>
@@ -340,7 +355,7 @@ export default function OverviewPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [hasData, setHasData] = useState(false)
   const [timeRange, setTimeRange] = useState<'7' | '14' | '30'>('14')
-  const [activeTab, setActiveTab] = useState<'overview' | 'brands' | 'creators' | 'rankings'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'brands' | 'creators' | 'rankings' | 'videos' | 'keywords' | 'trends' | 'growth' | 'alerts' | 'settings'>('overview')
   const [channelSearch, setChannelSearch] = useState('')
   const [videoSearch, setVideoSearch] = useState('')
   const [rankTab, setRankTab] = useState<'long' | 'short'>('long')
@@ -546,7 +561,7 @@ export default function OverviewPage() {
       value: item.views,
       pct: pct(item.views, totalViewsFiltered),
       videoCount: item.videoCount,
-      color: C[i % C.length]
+      color: brandColor(name)
     })).sort((a, b) => b.value - a.value)
 
     const topFreq = Array.from(brandMap.entries()).map(([name, item], i) => ({
@@ -554,7 +569,7 @@ export default function OverviewPage() {
       value: item.freq,
       pct: pct(item.freq, totalFreqFiltered),
       videoCount: item.videoCount,
-      color: C[i % C.length]
+      color: brandColor(name)
     })).sort((a, b) => b.value - a.value)
 
     const brandBar = topViews.slice(0, 5).map((b) => ({
@@ -870,6 +885,12 @@ export default function OverviewPage() {
           { id: 'brands', label: 'Brand SOV', icon: Layers },
           { id: 'creators', label: 'Creators', icon: Users },
           { id: 'rankings', label: 'Rankings', icon: Target },
+          { id: 'videos', label: 'Videos', icon: Video },
+          { id: 'keywords', label: 'Keywords', icon: Search },
+          { id: 'trends', label: 'Trends', icon: TrendingUp },
+          { id: 'growth', label: 'Growth', icon: Activity },
+          { id: 'alerts', label: 'Alerts', icon: Bell },
+          { id: 'settings', label: 'Settings', icon: Settings },
         ].map(({ id, label, icon: Icon }) => (
           <button key={id} className={`tab-pill ${activeTab === id ? 'on' : ''}`} onClick={() => setActiveTab(id as any)}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -900,23 +921,15 @@ export default function OverviewPage() {
           </button>
         </div>
       )}
-      {!isDemo && (
-        <div style={{ display:'flex',justifyContent:'flex-end',marginBottom:12 }}>
-          <button onClick={()=>setShowDemo(true)} style={{ display:'flex',alignItems:'center',gap:6,padding:'6px 13px',borderRadius:8,cursor:'pointer',background:'#F1F5F9',border:'1px solid #E2E8F0',color:'#475569',fontSize:12,fontWeight:600,fontFamily:'inherit' }}>
-            🧪 Show Demo Data
-          </button>
-        </div>
-      )}
-
       <div className="tab-pane">
 
         {/* ════════════════════════════════════════
             OVERVIEW TAB
             ════════════════════════════════════════ */}
         {activeTab === 'overview' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            {/* KPI row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Row 1: 6 cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 12 }}>
               <MetricCard
                 label="Keywords Tracked"
                 value={overview?.totalKeywords ?? 0}
@@ -948,39 +961,45 @@ export default function OverviewPage() {
                 info="Aggregated view count from all campaign videos."
               />
               <MetricCard
-                label="Top keyword type"
+                label="Top Keyword Type"
                 value={topCategory}
                 icon={Layers}
                 color="#6366F1"
                 info="The keyword category with the highest number of tracked keywords."
               />
-              {/* Views Growth — single card with tab selector */}
               <div style={{
-                background: '#fff', borderRadius: 12, padding: '14px 16px', border: '1px solid #F1F5F9',
-                display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: 110,
+                background: '#fff', borderRadius: 12, padding: '12px 14px', border: '1px solid #F1F5F9',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%',
                 transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
               }}>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <TrendingUp size={14} style={{ color: '#94A3B8' }} />
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Views Growth
-                    </span>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <TrendingUp size={13} style={{ color: '#94A3B8' }} />
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Views Growth</span>
+                    </div>
+                    <Info size={11} style={{ color: '#CBD5E1', cursor: 'help', flexShrink: 0 }} />
                   </div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace", marginBottom: 4 }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#0F172A', fontFamily: "'JetBrains Mono', monospace", marginTop: 6 }}>
                     {growthTab === '24h' ? formatGrowth(overview?.growth?.h24) : growthTab === '7d' ? formatGrowth(overview?.growth?.d7) : formatGrowth(overview?.growth?.d30)}
                   </div>
+                  <div style={{ fontSize: 10, color: '#94A3B8', fontWeight: 600, marginTop: 2 }}>
+                    {growthTab === '24h' ? `+${fmt(overview?.growth?.h24_gain ?? 0)} views` : growthTab === '7d' ? `+${fmt(overview?.growth?.d7_gain ?? 0)} views` : `+${fmt(overview?.growth?.d30_gain ?? 0)} views`}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 0, background: '#F1F5F9', borderRadius: 6, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', gap: 0, background: '#F1F5F9', borderRadius: 5, overflow: 'hidden', marginTop: 8 }}>
                   {(['24h', '7d', '30d'] as const).map(tab => (
                     <button key={tab} onClick={() => setGrowthTab(tab)} style={{
-                      flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 700, border: 'none', cursor: 'pointer',
+                      flex: 1, padding: '3px 0', fontSize: 9.5, fontWeight: 700, border: 'none', cursor: 'pointer',
                       background: growthTab === tab ? '#fff' : 'transparent', color: growthTab === tab ? '#0F172A' : '#94A3B8',
-                      boxShadow: growthTab === tab ? '0 1px 3px rgba(0,0,0,0.08)' : 'none', transition: 'all 0.15s',
+                      boxShadow: growthTab === tab ? '0 1px 2px rgba(0,0,0,0.06)' : 'none', transition: 'all 0.15s',
                     }}>{tab}</button>
                   ))}
                 </div>
               </div>
+            </div>
+            {/* Row 2: 5 cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
               <MetricCard
                 label="New Videos (7d)"
                 value={fmt(overview?.newVideosLast7Days ?? 0)}
@@ -1412,9 +1431,9 @@ export default function OverviewPage() {
               <div style={{ background: '#fff', borderRadius: 12, padding: '18px 20px', border: '1px solid #F1F5F9' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Top Ranked Videos</div>
-                  <span onClick={() => setActiveTab('rankings')} style={{ fontSize: 11, fontWeight: 700, color: '#1A73E8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Link href="/leaderboard" style={{ fontSize: 11, fontWeight: 700, color: '#1A73E8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 2, textDecoration: 'none' }}>
                     Full directory <ArrowUpRight size={10} />
-                  </span>
+                  </Link>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {videos.filter((v: any) => (v.keywords_appeared || []).length > 0).length === 0 ? (
@@ -2151,6 +2170,36 @@ export default function OverviewPage() {
             </div>
           </div>
         )}
+
+        {/* ════════════════════════════════════════
+            VIDEOS TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'videos' && <VideosTab />}
+
+        {/* ════════════════════════════════════════
+            KEYWORDS TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'keywords' && <KeywordsTab />}
+
+        {/* ════════════════════════════════════════
+            TRENDS TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'trends' && <TrendsTab />}
+
+        {/* ════════════════════════════════════════
+            GROWTH TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'growth' && <GrowthTab />}
+
+        {/* ════════════════════════════════════════
+            ALERTS TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'alerts' && <AlertsTab />}
+
+        {/* ════════════════════════════════════════
+            SETTINGS TAB
+            ════════════════════════════════════════ */}
+        {activeTab === 'settings' && <SettingsTab />}
       </div>
 
       {/* ════════════════════════════════════════

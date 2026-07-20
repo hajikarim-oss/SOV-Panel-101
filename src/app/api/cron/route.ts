@@ -142,48 +142,55 @@ async function runDailyViewsChunked(req: NextRequest) {
   // Step 2: Process this chunk — YouTube API calls in batches of 50
   let updated = 0
   let deleted = 0
+  let batchErrors = 0
 
   for (let i = 0; i < chunk.length; i += 50) {
     const batch = chunk.slice(i, i + 50)
     const ids = batch.map(r => r.youtube_id).filter(Boolean)
     if (ids.length === 0) continue
 
-    const stats = await getViewCountsOAuth(ids)
+    try {
+      const stats = await getViewCountsOAuth(ids)
 
-    const viewMap = new Map<string, number>()
-    const deletedIds: string[] = []
-    for (const stat of stats) {
-      if (stat.is_deleted) deletedIds.push(stat.youtube_id)
-      else viewMap.set(stat.youtube_id, stat.view_count)
+      const viewMap = new Map<string, number>()
+      const deletedIds: string[] = []
+      for (const stat of stats) {
+        if (stat.is_deleted) deletedIds.push(stat.youtube_id)
+        else viewMap.set(stat.youtube_id, stat.view_count)
+      }
+
+      if (deletedIds.length > 0) {
+        await supabase.from('videos').update({ is_deleted: true }).in('youtube_id', deletedIds)
+        deleted += deletedIds.length
+      }
+
+      // Batch update view counts
+      for (const [ytId, vc] of viewMap) {
+        await supabase.from('videos').update({ view_count: vc }).eq('youtube_id', ytId)
+      }
+
+      // Upsert view snapshots
+      const vsRows = batch
+        .filter(r => viewMap.has(r.youtube_id))
+        .map(r => ({
+          video_id: r.id,
+          campaign_id: r.campaign_id,
+          view_count: viewMap.get(r.youtube_id)!,
+          snapshot_date: today,
+        }))
+      if (vsRows.length > 0) {
+        await supabase.from('view_snapshots').upsert(vsRows, {
+          onConflict: 'video_id,campaign_id,snapshot_date',
+          ignoreDuplicates: false,
+        })
+      }
+
+      updated += viewMap.size
+    } catch (batchErr) {
+      console.error(`Batch failed at offset ${i}:`, batchErr)
+      batchErrors++
+      // Continue with next batch instead of failing entirely
     }
-
-    if (deletedIds.length > 0) {
-      await supabase.from('videos').update({ is_deleted: true }).in('youtube_id', deletedIds)
-      deleted += deletedIds.length
-    }
-
-    // Batch update view counts
-    for (const [ytId, vc] of viewMap) {
-      await supabase.from('videos').update({ view_count: vc }).eq('youtube_id', ytId)
-    }
-
-    // Upsert view snapshots
-    const vsRows = batch
-      .filter(r => viewMap.has(r.youtube_id))
-      .map(r => ({
-        video_id: r.id,
-        campaign_id: r.campaign_id,
-        view_count: viewMap.get(r.youtube_id)!,
-        snapshot_date: today,
-      }))
-    if (vsRows.length > 0) {
-      await supabase.from('view_snapshots').upsert(vsRows, {
-        onConflict: 'video_id,campaign_id,snapshot_date',
-        ignoreDuplicates: false,
-      })
-    }
-
-    updated += viewMap.size
   }
 
   const elapsed = Date.now() - startTime
@@ -210,6 +217,7 @@ async function runDailyViewsChunked(req: NextRequest) {
     processed: chunk.length,
     updated,
     deleted,
+    batch_errors: batchErrors,
     remaining,
     total,
     completed: remaining <= 0,

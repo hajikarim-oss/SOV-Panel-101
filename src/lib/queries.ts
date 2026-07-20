@@ -16,7 +16,7 @@ export interface OverviewData {
   untaggedVideos: number
   top5ByViewership: Array<{ brand_name: string; brand_total_views: number; sov_percent: number; video_count: number }>
   top5ByFrequency: Array<{ brand_name: string; brand_total_freq: number; freq_sov_percent: number; video_count: number }>
-  growth: { h24: number; d7: number; d30: number }
+  growth: { h24: number; d7: number; d30: number; h24_gain: number; d7_gain: number; d30_gain: number }
   activeScrapingJobs: number
   transcriptCoverage: number
 }
@@ -185,7 +185,7 @@ export async function getOverviewData(
     untaggedVideos: untaggedRes.count ?? 0,
     top5ByViewership: top5ViewsRes.data ?? [],
     top5ByFrequency: top5FreqRes.data ?? [],
-    growth: growthRes.data?.[0] ?? { h24: 0, d7: 0, d30: 0 },
+    growth: growthRes.data?.[0] ?? { h24: 0, d7: 0, d30: 0, h24_gain: 0, d7_gain: 0, d30_gain: 0 },
     activeScrapingJobs: scrapeJobsRes.count ?? 0,
     transcriptCoverage: stats.transcript_coverage ?? 0,
   }

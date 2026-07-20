@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { useCampaignStore } from '@/lib/store'
+import { Play } from 'lucide-react'
 
 // ── Nav Structure ──────────────────────────────────────────────────
 const NAV = [
@@ -24,6 +25,7 @@ const NAV = [
       { href: '/brands',        label: 'All Brands',        dot: 'blue' },
       { href: '/dropped',       label: 'Dropped Rankings',  dot: 'red' },
       { href: '/multi-keyword', label: 'Multi-Keyword',     dot: 'violet' },
+      { href: '/analytic-calendar', label: 'Calendar',      dot: 'blue' },
     ]
   },
   {
@@ -87,42 +89,29 @@ export default function Sidebar() {
 
       {/* ── Logo / Brand ── */}
       <div style={{
-        padding: collapsed ? '18px 16px' : '18px 20px',
+        padding: collapsed ? '16px 12px' : '12px 14px',
         borderBottom: '1px solid rgba(0,0,0,0.06)',
-        display: 'flex', alignItems: 'center', gap: 10,
-        minHeight: 64,
+        display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
+        minHeight: 52,
       }}>
-        {/* Logo mark — clean geometric mark */}
-        <div style={{
-          width: 30, height: 30, borderRadius: 7,
-          background: 'linear-gradient(135deg, #1A73E8 0%, #4285F4 100%)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-          boxShadow: '0 2px 8px rgba(26,115,232,0.3)',
-        }}>
-          {/* Abstract 3-bar chart icon using inline SVG — no lucide dep */}
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-            <rect x="1" y="8" width="3" height="6" rx="1" fill="white" opacity="0.8"/>
-            <rect x="6" y="4" width="3" height="10" rx="1" fill="white" opacity="0.9"/>
-            <rect x="11" y="1" width="3" height="13" rx="1" fill="white"/>
-          </svg>
-        </div>
-
-        {!collapsed && (
-          <div>
-            <div style={{
-              fontSize: 13.5, fontWeight: 800, color: '#0F172A',
-              letterSpacing: '-0.3px', lineHeight: 1.2,
-            }}>
-              SOV Panel
-            </div>
-            <div style={{
-              fontSize: 9.5, color: '#64748B', fontWeight: 700,
-              letterSpacing: '0.8px', marginTop: 1, textTransform: 'uppercase',
-            }}>
-              The Bored Monkey
-            </div>
+        {collapsed ? (
+          <div style={{
+            width: 30, height: 30, borderRadius: 8,
+            background: 'linear-gradient(135deg, #1A73E8 0%, #4285F4 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
+              <rect x="1" y="8" width="3" height="6" rx="1" fill="white" opacity="0.8"/>
+              <rect x="6" y="4" width="3" height="10" rx="1" fill="white" opacity="0.9"/>
+              <rect x="11" y="1" width="3" height="13" rx="1" fill="white"/>
+            </svg>
           </div>
+        ) : (
+          <img
+            src="/tbm-logo.png"
+            alt="The Bored Monkey"
+            style={{ width: '100%', height: 'auto', display: 'block' }}
+          />
         )}
       </div>
 
@@ -292,6 +281,26 @@ export default function Sidebar() {
             Logout
           </button>
         </div>
+      )}
+
+      {/* ── Replay Tutorial ── */}
+      {!collapsed && (
+        <button
+          onClick={() => (window as any).__replayTutorial?.()}
+          style={{
+            margin: '0 8px 4px', padding: '7px 10px',
+            borderRadius: 7, background: 'transparent',
+            border: '1px solid rgba(26,115,232,0.12)',
+            color: '#1A73E8', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 7,
+            transition: 'all 0.12s', fontFamily: 'inherit',
+            fontSize: 11.5, fontWeight: 600,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(26,115,232,0.06)' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+        >
+          <Play size={12} /> Replay Tutorial
+        </button>
       )}
 
       {/* ── Collapse toggle ── */}

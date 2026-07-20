@@ -566,7 +566,7 @@ export async function runBrandAnalysis(campaignId?: string, limit = 10): Promise
   const params = campaignId ? [campaignId] : []
 
   const videos = db.prepare(`
-    SELECT v.id, v.youtube_id, v.title
+    SELECT v.id, v.youtube_id, v.title, v.channel_name, v.description
     FROM videos v
     ${where}
     ORDER BY v.view_count DESC
@@ -614,11 +614,13 @@ export async function runBrandAnalysis(campaignId?: string, limit = 10): Promise
         upsertTranscript.run(video.id, transcriptText, language)
       }
 
-      // Analyze with Gemini
+      // Analyze with AI
       const detections = await analyzeBrandsFromTranscript(
         transcriptText,
         video.title,
-        brandNames
+        brandNames,
+        video.channel_name || '',
+        video.description || ''
       )
 
       // Store detections
