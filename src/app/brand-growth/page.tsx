@@ -8,7 +8,18 @@ import { getClientCache, setClientCache } from '@/lib/cache'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
-const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
+const COLORS = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length]
+}
 
 function fmt(n: number | null | undefined) {
   if (n === null || n === undefined || isNaN(n)) return '—'
@@ -219,7 +230,7 @@ export default function BrandGrowthPage() {
                   <ReferenceLine y={0} stroke="#CBD5E1" strokeDasharray="4 4" />
                   <Bar dataKey="growthPercent" name="Growth" radius={[6, 6, 0, 0]}>
                     {sorted.map((entry, index) => (
-                      <Cell key={index} fill={entry.growthPercent >= 0 ? '#10B981' : '#EF4444'} />
+                      <Cell key={index} fill={brandColor(entry.brand_name, index)} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -248,7 +259,7 @@ export default function BrandGrowthPage() {
                 </thead>
                 <tbody>
                   {sorted.map((row, i) => {
-                    const color = COLORS[data.findIndex(d => d.brand_name === row.brand_name) % COLORS.length]
+                    const color = brandColor(row.brand_name, i)
                     return (
                       <tr key={row.brand_name}>
                         <td style={{ textAlign: 'center', fontWeight: 800, color: '#94A3B8' }}>{i + 1}</td>

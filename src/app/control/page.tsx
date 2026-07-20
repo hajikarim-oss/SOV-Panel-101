@@ -513,7 +513,7 @@ export default function ControlPage() {
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
                 Campaigns <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({campaigns.length})</span>
               </div>
-              <button className="btn btn-blue btn-xs" onClick={() => setShowNewCampaign(v => !v)}>
+              <button className="btn btn-blue btn-xs" onClick={() => setShowNewCampaign(v => !v)} data-tutorial="create-campaign">
                 <Plus size={12} /> New
               </button>
             </div>
@@ -645,6 +645,7 @@ export default function ControlPage() {
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => setShowAddKw(v => !v)}
+                        data-tutorial="add-keywords"
                       >
                         <Plus size={13} /> Add Keywords
                       </button>
@@ -652,6 +653,7 @@ export default function ControlPage() {
                         className="btn btn-blue btn-sm"
                         onClick={() => triggerScrape()}
                         disabled={scraping || keywords.filter(k => k.status === 'active').length === 0}
+                        data-tutorial="run-scrape"
                       >
                         {scraping
                           ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Scraping…</>

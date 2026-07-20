@@ -12,7 +12,18 @@ import { AlertCircle, TrendingUp, TrendingDown, RefreshCw, ChevronUp, ChevronDow
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
-const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#F06292']
+const COLORS = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length]
+}
 
 const RANGES = [
   { key: '1', label: 'Daily' },
@@ -63,7 +74,7 @@ function computeBrandStats(data: any[], brands: string[]) {
     delta: prev ? ((last[b] ?? 0) - (prev[b] ?? 0)) : 0,
     peak: peak(b),
     avg: avg(b),
-    color: COLORS[i % COLORS.length],
+    color: brandColor(b, i),
   })).sort((a, b) => b.current - a.current)
 }
 
@@ -151,7 +162,7 @@ export default function SovTrendPage() {
   const barCompare = brands.map((b, i) => ({
     brand: b.length > 14 ? b.slice(0, 14) + '…' : b,
     sov: lastSnapshot?.[b] ?? 0,
-    color: COLORS[i % COLORS.length],
+    color: brandColor(b, i),
   })).sort((a, b) => b.sov - a.sov)
 
   return (
@@ -253,8 +264,8 @@ export default function SovTrendPage() {
                 <defs>
                   {effectiveActiveBrands.map((b, i) => (
                     <linearGradient key={b} id={`sov_grad_${i}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.2} />
-                      <stop offset="95%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0} />
+                      <stop offset="5%" stopColor={brandColor(b, i)} stopOpacity={0.2} />
+                      <stop offset="95%" stopColor={brandColor(b, i)} stopOpacity={0} />
                     </linearGradient>
                   ))}
                 </defs>
@@ -268,7 +279,7 @@ export default function SovTrendPage() {
                     dataKey={showAvg ? `${b}_avg` : b}
                     name={b}
                     stackId="1"
-                    stroke={COLORS[i % COLORS.length]}
+                    stroke={brandColor(b, i)}
                     fill={`url(#sov_grad_${i})`}
                     strokeWidth={2}
                     dot={false}
@@ -287,7 +298,7 @@ export default function SovTrendPage() {
                     key={b} type="monotone"
                     dataKey={showAvg ? `${b}_avg` : b}
                     name={b}
-                    stroke={COLORS[i % COLORS.length]}
+                    stroke={brandColor(b, i)}
                     strokeWidth={2.5}
                     dot={false}
                     activeDot={{ r: 5, strokeWidth: 0 }}
@@ -351,7 +362,7 @@ export default function SovTrendPage() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {brands.map((b, i) => {
             const active = effectiveActiveBrands.includes(b)
-            const color = COLORS[i % COLORS.length]
+            const color = brandColor(b, i)
             return (
               <button
                 key={b}

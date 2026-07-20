@@ -8,7 +8,18 @@ import { PageSkeleton } from '@/components/PageSkeleton'
 import { Loader2, Eye, Hash, TrendingUp, Award, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 
-const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#14B8A6', '#F97316', '#6366F1']
+const COLORS = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length]
+}
 
 function fmt(n: number | null | undefined): string {
   if (n == null || isNaN(n)) return '0'
@@ -166,7 +177,7 @@ export default function BrandIntelligencePage() {
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 12, fill: '#475569', fontWeight: 600 }} axisLine={false} tickLine={false} width={75} />
                     <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(26,115,232,0.04)' }} />
                     <Bar dataKey="sov_percent" radius={[0, 6, 6, 0]} barSize={24}>
-                      {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                      {chartData.map((d, i) => <Cell key={i} fill={brandColor(d.name, i)} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
@@ -183,7 +194,7 @@ export default function BrandIntelligencePage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={50} paddingAngle={2}>
-                        {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                        {pieData.map((d, i) => <Cell key={i} fill={brandColor(d.name, i)} />)}
                       </Pie>
                       <Tooltip content={<CustomTooltip />} />
                     </PieChart>

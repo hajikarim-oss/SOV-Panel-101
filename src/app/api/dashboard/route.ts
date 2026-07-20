@@ -170,16 +170,27 @@ async function fetchDashboard(cid: string, isOurs?: string | null) {
       GROUP BY k.language
     `, [cid]),
 
-    // Daily views group by
+    // Daily views group by — scoped to top-10 ranked videos per keyword (matches queryViewSumSQL)
     queryAll<{ snapshot_date: string; total_views: number }>(`
       SELECT
-        snapshot_date::TEXT,
-        SUM(view_count)::BIGINT AS total_views
-      FROM view_snapshots
-      WHERE campaign_id = $1
-        AND snapshot_date >= $2::date
-      GROUP BY snapshot_date
-      ORDER BY snapshot_date ASC
+        vs.snapshot_date::TEXT,
+        SUM(vs.view_count)::BIGINT AS total_views
+      FROM view_snapshots vs
+      JOIN (
+        SELECT DISTINCT video_id
+        FROM (
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_videos WHERE campaign_id = $1
+          UNION ALL
+          SELECT video_id, ROW_NUMBER() OVER (PARTITION BY keyword_id ORDER BY rank ASC) as rn
+          FROM keyword_shorts WHERE campaign_id = $1
+        ) t
+        WHERE rn <= 10
+      ) uv ON uv.video_id = vs.video_id
+      WHERE vs.campaign_id = $1
+        AND vs.snapshot_date >= $2::date
+      GROUP BY vs.snapshot_date
+      ORDER BY vs.snapshot_date ASC
     `, [cid, thirtyDaysAgo]),
 
     // Daily new videos added

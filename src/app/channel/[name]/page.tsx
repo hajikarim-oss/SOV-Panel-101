@@ -14,7 +14,18 @@ import {
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
 
-const C = ['#1A73E8', '#10B981', '#F59E0B', '#EC4899', '#8B5CF6', '#06B6D4', '#EF4444', '#14B8A6']
+const C = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return C[Math.abs(hash) % C.length]
+}
 
 function fmtNum(n: number | null | undefined) {
   if (!n) return '—'

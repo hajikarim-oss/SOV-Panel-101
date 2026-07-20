@@ -11,7 +11,18 @@ import { AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X, L
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
-const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
+const COLORS = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length]
+}
 
 const LANGUAGE_OPTS = [
   { value: 'all', label: 'All Languages' },
@@ -196,7 +207,7 @@ export default function KeywordSovPage() {
   const avgSov = brands.map((b, i) => ({
     brand: b.length > 14 ? b.slice(0, 14) + '…' : b,
     avg: data.length > 0 ? data.reduce((s, kw) => s + Number(kw[b] ?? 0), 0) / data.length : 0,
-    color: COLORS[i % COLORS.length],
+    color: brandColor(b, i),
   })).sort((a, b) => b.avg - a.avg)
 
   const dominance: Record<string, number> = {}
@@ -205,7 +216,7 @@ export default function KeywordSovPage() {
     const maxBrand = brands.reduce((best, b) => (Number(kw[b] ?? 0) > Number(kw[best] ?? 0) ? b : best), brands[0])
     if (maxBrand) dominance[maxBrand] = (dominance[maxBrand] ?? 0) + 1
   })
-  const dominancePie = brands.map((b, i) => ({ name: b, value: dominance[b] ?? 0, color: COLORS[i % COLORS.length] })).filter(d => d.value > 0)
+  const dominancePie = brands.map((b, i) => ({ name: b, value: dominance[b] ?? 0, color: brandColor(b, i) })).filter(d => d.value > 0)
 
   const chartHeight = Math.max(300, data.length * 40)
   const topKeyword = [...data].sort((a, b) => (b.total_videos ?? 0) - (a.total_videos ?? 0))[0]
@@ -399,7 +410,7 @@ export default function KeywordSovPage() {
                     <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(26,115,232,0.02)' }} />
                     <Legend iconType="circle" layout="horizontal" verticalAlign="top" align="right" wrapperStyle={{ paddingTop: 8, fontSize: 11 }} />
                     {brands.map((bName, index) => (
-                      <Bar key={bName} dataKey={bName} name={bName} stackId="a" fill={COLORS[index % COLORS.length]} barSize={14}
+                      <Bar key={bName} dataKey={bName} name={bName} stackId="a" fill={brandColor(bName, index)} barSize={14}
                         radius={index === brands.length - 1 ? [0, 4, 4, 0] : [0, 0, 0, 0]} />
                     ))}
                     <Bar key="Other" dataKey="Other" name="Other" stackId="a" fill="#E2E8F0" barSize={14} radius={[0, 4, 4, 0]} />
@@ -416,7 +427,7 @@ export default function KeywordSovPage() {
                   <tr>
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', minWidth: 140 }}>Keyword</th>
                     {brands.map((b, bi) => (
-                      <th key={b} style={{ padding: '8px 8px', textAlign: 'center', fontSize: 10, fontWeight: 700, color: COLORS[bi % COLORS.length], minWidth: 70 }}>{b.length > 10 ? b.slice(0, 10) + '…' : b}</th>
+                      <th key={b} style={{ padding: '8px 8px', textAlign: 'center', fontSize: 10, fontWeight: 700, color: brandColor(b, bi), minWidth: 70 }}>{b.length > 10 ? b.slice(0, 10) + '…' : b}</th>
                     ))}
                     <th style={{ padding: '8px 8px', textAlign: 'center', fontSize: 10, fontWeight: 700, color: '#94A3B8', minWidth: 50 }}>Other</th>
                   </tr>
@@ -430,7 +441,7 @@ export default function KeywordSovPage() {
                       </td>
                       {brands.map((b, bi) => {
                         const val = Number(kw[b] ?? 0)
-                        const color = COLORS[bi % COLORS.length]
+                        const color = brandColor(b, bi)
                         const barWidth = `${Math.round(Math.max(0.04, Math.min(1, val / 100)) * 100)}%`
                         return (
                           <td key={b} style={{ padding: '6px 8px', textAlign: 'center' }} title={`${b}: ${val.toFixed(1)}%`}>

@@ -10,7 +10,18 @@ import {
 import { Eye, Video, Hash, TrendingUp, AlertTriangle, ChevronRight, Loader2, AlertCircle, Target, Activity } from 'lucide-react'
 import ClientSidebar from '@/components/ClientSidebar'
 
-const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4', '#EC4899', '#94A3B8']
+const COLORS = [
+  '#4C78A8', '#54A24B', '#E45756', '#72B7B2', '#EECA3B',
+  '#B279A2', '#FF9DA6', '#9D755D', '#BAB0AC', '#D67195',
+  '#F58518', '#4C78A8', '#54A24B', '#E45756', '#72B7B2',
+  '#79B8FF', '#A8D8B9', '#F4A582', '#CAB2D6', '#FFFFB3',
+]
+
+function brandColor(name: string, idx: number): string {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
+  return COLORS[Math.abs(hash) % COLORS.length]
+}
 
 function fmt(n: number | null | undefined): string {
   if (n === null || n === undefined || isNaN(n)) return '0'
@@ -214,8 +225,8 @@ export default function ClientDashboard() {
   const keywordRankings = overview?.keywordRankings || []
 
   // Analytics data
-  const pieColors = competitorPie.map((c: any) =>
-    c.name?.toLowerCase() === brandName.toLowerCase() ? '#1A73E8' : COLORS[competitorPie.indexOf(c) % COLORS.length]
+  const pieColors = competitorPie.map((c: any, i: number) =>
+    c.name?.toLowerCase() === brandName.toLowerCase() ? '#4C78A8' : brandColor(c.name || '', i)
   )
 
   const sovTimeline = buildSovTimeline(metrics.sov_percent)

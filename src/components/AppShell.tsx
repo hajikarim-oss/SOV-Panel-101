@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation'
 import Sidebar from '@/components/Sidebar'
 import Header from '@/components/Header'
+import TutorialOverlay from '@/components/TutorialOverlay'
 
 const PUBLIC_PATHS = ['/login', '/privacy-policy']
 
@@ -23,6 +24,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </div>
       </main>
+      <TutorialOverlay />
     </div>
   )
 }
