@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Video, Search, ExternalLink, ChevronLeft, ChevronRight, Tag, Eye } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 import { PageSkeleton } from '@/components/PageSkeleton'
@@ -35,21 +36,15 @@ const PER_PAGE = 20
 
 export default function VideosPage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
-  const [data, setData] = useState<CampaignVideo[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [sort, setSort] = useState<'views' | 'title' | 'date' | 'channel'>('views')
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
-  const fetchData = useCallback(async () => {
-    if (!activeCampaignId) return
-    setLoading(true)
-    setError('')
-    try {
+  const videosQuery = useQuery({
+    queryKey: ['videos-campaign', activeCampaignId, page, sort, search],
+    queryFn: async () => {
       const params = new URLSearchParams({
-        campaign_id: activeCampaignId,
+        campaign_id: activeCampaignId!,
         page: String(page),
         limit: String(PER_PAGE),
         sort,
@@ -58,17 +53,16 @@ export default function VideosPage() {
       const res = await fetch(`/api/videos/campaign?${params}`)
       const json = await res.json()
       if (json.error) throw new Error(json.error)
-      setData(json.data || [])
-      setTotal(json.total || 0)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load videos')
-    } finally {
-      setLoading(false)
-    }
-  }, [activeCampaignId, page, sort, search])
+      return { data: json.data || [] as CampaignVideo[], total: json.total || 0 }
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data = videosQuery.data?.data ?? []
+  const total = videosQuery.data?.total ?? 0
+  const loading = videosQuery.isLoading
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => { setPage(1) }, [sort, search])
 
   const totalPages = Math.ceil(total / PER_PAGE)
@@ -107,8 +101,8 @@ export default function VideosPage() {
 
       {loading ? (
         <PageSkeleton cols={4} rows={8} />
-      ) : error ? (
-        <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{error}</div>
+      ) : videosQuery.error ? (
+        <div style={{ textAlign: 'center', padding: 60, color: '#EF4444', fontSize: 13 }}>{(videosQuery.error as Error).message}</div>
       ) : data.length === 0 ? (
         <div style={{
           display: 'flex', gap: 12, padding: 28, borderRadius: 14, background: '#FFFFFF',

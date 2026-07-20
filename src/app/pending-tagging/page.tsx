@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Video, Search, ExternalLink, ChevronLeft, ChevronRight, Tag, Brain, AlertCircle, Check, Loader2 } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 import { PageSkeleton } from '@/components/PageSkeleton'
@@ -37,25 +38,19 @@ const PER_PAGE = 20
 
 export default function PendingTaggingPage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
-  const [data, setData] = useState<PendingVideo[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [analyzing, setAnalyzing] = useState<Set<string>>(new Set())
   const [tagModal, setTagModal] = useState<{ videoId: string; title: string; brands: string[] } | null>(null)
   const [manualTag, setManualTag] = useState('')
   const [tagSaving, setTagSaving] = useState(false)
   const [campaignBrands, setCampaignBrands] = useState<string[]>([])
 
-  const fetchData = useCallback(async () => {
-    if (!activeCampaignId) return
-    setLoading(true)
-    setError('')
-    try {
+  const pendingQuery = useQuery({
+    queryKey: ['pending-tagging', activeCampaignId, page, search],
+    queryFn: async () => {
       const params = new URLSearchParams({
-        campaign_id: activeCampaignId,
+        campaign_id: activeCampaignId!,
         page: String(page),
         limit: String(PER_PAGE),
       })
@@ -63,14 +58,15 @@ export default function PendingTaggingPage() {
       const res = await fetch(`/api/videos/pending-tagging?${params}`)
       const json = await res.json()
       if (json.error) throw new Error(json.error)
-      setData(json.data || [])
-      setTotal(json.total || 0)
-    } catch (err: any) {
-      setError(err.message || 'Failed to load pending videos')
-    } finally {
-      setLoading(false)
-    }
-  }, [activeCampaignId, page, search])
+      return json as { data: PendingVideo[]; total: number }
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data = pendingQuery.data?.data ?? []
+  const total = pendingQuery.data?.total ?? 0
+  const loading = pendingQuery.isLoading
+  const error = pendingQuery.error ? (pendingQuery.error as Error).message : ''
 
   const fetchBrands = useCallback(async (campId: string) => {
     try {
@@ -81,7 +77,6 @@ export default function PendingTaggingPage() {
   }, [])
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => { if (activeCampaignId) fetchBrands(activeCampaignId) }, [activeCampaignId, fetchBrands])
   useEffect(() => { setPage(1) }, [search])
 
@@ -98,7 +93,7 @@ export default function PendingTaggingPage() {
       })
       setManualTag('')
       setTagModal(null)
-      fetchData()
+      pendingQuery.refetch()
     } catch (err) {
       console.error('Tag save error:', err)
     } finally {
@@ -122,6 +117,7 @@ export default function PendingTaggingPage() {
       } else {
         setTagModal(prev => prev ? { ...prev, brands: [] } : null)
       }
+      pendingQuery.refetch()
     } catch (err) {
       console.error('AI analyze error:', err)
     } finally {

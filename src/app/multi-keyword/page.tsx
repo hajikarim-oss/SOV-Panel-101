@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Layers, Loader2, AlertCircle, Hash, ChevronDown, ChevronUp, Search } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 
@@ -81,9 +82,6 @@ function KeywordPills({ keywords, max = 5 }: { keywords: string[], max?: number 
 export default function MultiKeywordPage() {
   const { activeCampaignId, fetchCampaigns } = useCampaignStore()
   const [minKeywords, setMinKeywords] = useState(2)
-  const [data, setData] = useState<MultiVideo[]>([])
-  const [commonTerms, setCommonTerms] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
 
   // Filters State
   const [search, setSearch] = useState('')
@@ -92,25 +90,26 @@ export default function MultiKeywordPage() {
   const [selectedChannel, setSelectedChannel] = useState('')
   const [campaignBrands, setCampaignBrands] = useState<string[]>([])
   const [keywords, setKeywords] = useState<any[]>([])
-  const [channels, setChannels] = useState<string[]>([])
 
-  const fetchMulti = useCallback(async (campId: string, minK: number, brand = '', kwId = '', qStr = '', channel = '') => {
-    setLoading(true)
-    try {
-      let url = `/api/videos/multi-keyword?campaign_id=${campId}&min_keywords=${minK}`
-      if (brand) url += `&brand_name=${encodeURIComponent(brand)}`
-      if (kwId) url += `&keyword_id=${encodeURIComponent(kwId)}`
-      if (channel) url += `&channel_name=${encodeURIComponent(channel)}`
-      if (qStr.trim()) url += `&q=${encodeURIComponent(qStr.trim())}`
-      
+  const multiQuery = useQuery({
+    queryKey: ['multi-keyword', activeCampaignId, minKeywords, selectedBrand, selectedKeyword, search, selectedChannel],
+    queryFn: async () => {
+      let url = `/api/videos/multi-keyword?campaign_id=${activeCampaignId}&min_keywords=${minKeywords}`
+      if (selectedBrand) url += `&brand_name=${encodeURIComponent(selectedBrand)}`
+      if (selectedKeyword) url += `&keyword_id=${encodeURIComponent(selectedKeyword)}`
+      if (selectedChannel) url += `&channel_name=${encodeURIComponent(selectedChannel)}`
+      if (search.trim()) url += `&q=${encodeURIComponent(search.trim())}`
+
       const res = await fetch(url)
       const d = await res.json()
-      if (d.data) setData(d.data)
-      if (d.channels) setChannels(d.channels)
-      setCommonTerms(d.common_terms ?? [])
-    } catch (e) { console.error(e) }
-    finally { setLoading(false) }
-  }, [])
+      return d
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data = multiQuery.data?.data ?? []
+  const commonTerms = multiQuery.data?.common_terms ?? []
+  const channels = multiQuery.data?.channels ?? []
 
   const fetchBrands = useCallback(async (campId: string) => {
     try {
@@ -136,15 +135,12 @@ export default function MultiKeywordPage() {
   
   useEffect(() => {
     if (activeCampaignId) {
-      fetchMulti(activeCampaignId, minKeywords, selectedBrand, selectedKeyword, search, selectedChannel)
       fetchBrands(activeCampaignId)
       fetchKeywords(activeCampaignId)
-    } else {
-      setLoading(false)
     }
-  }, [activeCampaignId, minKeywords, selectedBrand, selectedKeyword, search, selectedChannel, fetchMulti, fetchBrands, fetchKeywords])
+  }, [activeCampaignId, fetchBrands, fetchKeywords])
 
-  if (loading) return (
+  if (multiQuery.isLoading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', flexDirection: 'column', gap: 12 }}>
       <Loader2 size={32} style={{ color: '#1A73E8', animation: 'spin 1s linear infinite' }} />
       <div style={{ fontSize: 13.5, color: '#64748B', fontWeight: 600 }}>Loading multi-keyword data…</div>

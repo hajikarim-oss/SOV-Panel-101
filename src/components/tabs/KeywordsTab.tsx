@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { Search, Plus, Trash2, Loader2, Globe, Clock, ArrowUpDown } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 
 function fmtRelative(iso: string | null): string {
   if (!iso) return 'Never'
@@ -29,8 +29,6 @@ type SortKey = 'name' | 'videos' | 'last_scraped' | 'status'
 
 export default function KeywordsTab() {
   const { activeCampaignId } = useCampaignStore()
-  const [keywords, setKeywords] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [bulkKw, setBulkKw] = useState('')
   const [kwLang, setKwLang] = useState('en')
@@ -44,18 +42,18 @@ export default function KeywordsTab() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
 
-  const fetchKeywords = useCallback(async (campId: string) => {
-    if (!campId) return
-    const ck = `kw-tab-v3:${campId}`
-    const cached = getClientCache<any>(ck)
-    if (cached) { setKeywords(cached.keywords ?? []); setLoading(false); return }
-    setLoading(true)
-    try { const res = await fetch(`/api/keywords?campaign_id=${campId}`); const d = await res.json(); setKeywords(d.keywords ?? []); setClientCache(ck, d) }
-    catch { /* ignore */ }
-    finally { setLoading(false) }
-  }, [])
+  const keywordsQuery = useQuery({
+    queryKey: ['keywords-tab', activeCampaignId],
+    queryFn: async () => {
+      const res = await fetch(`/api/keywords?campaign_id=${activeCampaignId}`)
+      const d = await res.json()
+      return d.keywords ?? []
+    },
+    enabled: !!activeCampaignId,
+  })
 
-  useEffect(() => { if (activeCampaignId) fetchKeywords(activeCampaignId) }, [activeCampaignId, fetchKeywords])
+  const keywords = keywordsQuery.data ?? []
+  const loading = keywordsQuery.isLoading
 
   const addKeywords = async () => {
     if (!activeCampaignId || !bulkKw.trim()) return
@@ -63,29 +61,29 @@ export default function KeywordsTab() {
     try {
       const items = bulkKw.split('\n').map(l => l.trim()).filter(Boolean).map(text => ({ text, language: kwLang, type: kwType }))
       await fetch('/api/keywords', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ campaign_id: activeCampaignId, keywords: items }) })
-      setBulkKw(''); setShowAdd(false); fetchKeywords(activeCampaignId)
+      setBulkKw(''); setShowAdd(false); keywordsQuery.refetch()
     } catch { /* ignore */ } finally { setAdding(false) }
   }
 
   const deleteKeyword = async (id: string) => {
     if (!confirm('Delete this keyword?')) return
-    try { await fetch('/api/keywords', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); if (activeCampaignId) fetchKeywords(activeCampaignId) } catch { /* ignore */ }
+    try { await fetch('/api/keywords', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); keywordsQuery.refetch() } catch { /* ignore */ }
   }
 
   const toggleStatus = async (id: string, currentStatus: string) => {
     const newStatus = currentStatus === 'active' ? 'paused' : 'active'
-    try { await fetch('/api/keywords', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: newStatus }) }); if (activeCampaignId) fetchKeywords(activeCampaignId) } catch { /* ignore */ }
+    try { await fetch('/api/keywords', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: newStatus }) }); keywordsQuery.refetch() } catch { /* ignore */ }
   }
 
   const bulkDelete = async () => {
     if (selected.size === 0 || !confirm(`Delete ${selected.size} keyword(s)?`)) return
     setBulkDeleting(true)
-    try { for (const id of selected) await fetch('/api/keywords', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); setSelected(new Set()); if (activeCampaignId) fetchKeywords(activeCampaignId) } catch { /* ignore */ } finally { setBulkDeleting(false) }
+    try { for (const id of selected) await fetch('/api/keywords', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); setSelected(new Set()); keywordsQuery.refetch() } catch { /* ignore */ } finally { setBulkDeleting(false) }
   }
 
   const bulkToggleStatus = async (newStatus: 'active' | 'paused') => {
     if (selected.size === 0) return
-    try { for (const id of selected) await fetch('/api/keywords', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: newStatus }) }); setSelected(new Set()); if (activeCampaignId) fetchKeywords(activeCampaignId) } catch { /* ignore */ }
+    try { for (const id of selected) await fetch('/api/keywords', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status: newStatus }) }); setSelected(new Set()); keywordsQuery.refetch() } catch { /* ignore */ }
   }
 
   const filtered = useMemo(() => {

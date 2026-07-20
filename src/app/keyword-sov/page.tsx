@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, PieChart, Pie, Cell
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, RefreshCw, Hash, Target, BarChart2, Download, Pencil, X, Loader2 } from 'lucide-react'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
@@ -80,9 +80,6 @@ export default function KeywordSovPage() {
   const [lang, setLang] = useState('all')
   const [type, setType] = useState('all')
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
-  const [data, setData] = useState<any[]>([])
-  const [brands, setBrands] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
   const [viewMode, setViewMode] = useState<'chart' | 'heatmap' | 'table'>('chart')
   const [sortKey, setSortKey] = useState<string>('total_videos')
   const [sortDesc, setSortDesc] = useState<boolean>(true)
@@ -94,37 +91,22 @@ export default function KeywordSovPage() {
   const [editType, setEditType] = useState('generic')
   const [editSaving, setEditSaving] = useState(false)
 
-  const fetchSOV = useCallback(async (campId: string, l: string, t: string, o?: string) => {
-    if (!campId) { setLoading(false); return }
-    const ck = `kwsov:${campId}:${l}:${t}:${o ?? 'all'}`
-    const cached = getClientCache<any>(ck)
-    if (cached) {
-      if (cached.data && cached.data.length > 0) {
-        setData(cached.data)
-        setBrands(cached.brandNames ?? [])
-      } else { setData([]); setBrands([]) }
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const ownershipParam = o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''
-      const res = await fetch(`/api/keywords/sov?campaign_id=${campId}&language=${l}&type=${t}${ownershipParam}`)
-      const d = await res.json()
-      if (d.data && d.data.length > 0) {
-        setData(d.data)
-        setBrands(d.brandNames ?? [])
-      } else { setData([]); setBrands([]) }
-      setClientCache(ck, d)
-    } catch (e) { console.error(e); setData([]); setBrands([]) }
-    finally { setLoading(false) }
-  }, [])
+  const ownershipParam = ownershipFilter && ownershipFilter !== 'all' ? `&is_ours=${ownershipFilter === 'ours'}` : ''
+
+  const sovQuery = useQuery({
+    queryKey: ['keyword-sov', activeCampaignId, lang, type, ownershipFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/keywords/sov?campaign_id=${activeCampaignId}&language=${lang}&type=${type}${ownershipParam}`)
+      if (!res.ok) throw new Error('Failed to fetch keyword SOV')
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data: any[] = sovQuery.data?.data ?? []
+  const brands: string[] = sovQuery.data?.brandNames ?? []
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) fetchSOV(activeCampaignId, lang, type, ownershipFilter)
-    else { setLoading(false); setData([]); setBrands([]) }
-  }, [activeCampaignId, lang, type, ownershipFilter, fetchSOV])
 
   useEffect(() => {
     if (!activeCampaignId) return
@@ -161,7 +143,7 @@ export default function KeywordSovPage() {
       })
       if (res.ok) {
         setEditModal({ open: false, keyword: null })
-        if (activeCampaignId) fetchSOV(activeCampaignId, lang, type, ownershipFilter)
+        if (activeCampaignId) sovQuery.refetch()
       }
     } catch (e) { console.error(e) }
     finally { setEditSaving(false) }
@@ -181,7 +163,7 @@ export default function KeywordSovPage() {
     const a = document.createElement('a'); a.href = url; a.download = `keyword_sov.csv`; a.click()
   }
 
-  if (loading) return (
+  if (sovQuery.isLoading) return (
     <div className="anim-fade-up">
       <PageSkeleton cols={4} rows={5} />
     </div>

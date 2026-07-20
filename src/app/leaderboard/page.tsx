@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, Download, ChevronUp, ChevronDown, Search, AlertCircle, Plus, X, Tag, Brain, Loader2 } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 import { PageSkeleton } from '@/components/PageSkeleton'
@@ -84,9 +85,6 @@ export default function LeaderboardPage() {
   const [sort, setSort] = useState<'views' | 'frequency' | 'rank'>('views')
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [videos, setVideos] = useState<VideoRow[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
   
   // Filters
   const [selectedBrand, setSelectedBrand] = useState('')
@@ -94,7 +92,6 @@ export default function LeaderboardPage() {
   const [selectedChannel, setSelectedChannel] = useState('')
   const [selectedOwnership, setSelectedOwnership] = useState<'all' | 'ours' | 'theirs'>('all')
   const [keywords, setKeywords] = useState<any[]>([])
-  const [channels, setChannels] = useState<string[]>([])
 
   // Tag editing state
   const [editingVideoId, setEditingVideoId] = useState<string | null>(null)
@@ -103,30 +100,6 @@ export default function LeaderboardPage() {
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [batchAnalyzing, setBatchAnalyzing] = useState(false)
   const [expandedKeywords, setExpandedKeywords] = useState<Set<string>>(new Set())
-
-  const fetchVideos = useCallback(async (campId: string, t: 'long' | 'short', s: 'views' | 'frequency' | 'rank', p: number, brand = '', kwId = '', qStr = '', channel = '', ownership = 'all') => {
-    if (!campId) return
-    setLoading(true)
-    try {
-      let url = `/api/videos/leaderboard?campaign_id=${campId}&tab=${t}&sort=${s}&page=${p}&limit=${PER_PAGE}`
-      if (brand) url += `&brand_name=${encodeURIComponent(brand)}`
-      if (kwId) url += `&keyword_id=${encodeURIComponent(kwId)}`
-      if (channel) url += `&channel_name=${encodeURIComponent(channel)}`
-      if (qStr.trim()) url += `&q=${encodeURIComponent(qStr.trim())}`
-      if (ownership !== 'all') url += `&is_ours=${ownership === 'ours' ? 'true' : 'false'}`
-      const res = await fetch(url)
-      const d = await res.json()
-      if (d.data) {
-        setVideos(d.data)
-        setTotal(d.total ?? 0)
-        if (d.channels) setChannels(d.channels)
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   const fetchBrands = useCallback(async (campId: string) => {
     try {
@@ -165,33 +138,42 @@ export default function LeaderboardPage() {
   }, [activeCampaignId, fetchBrands, fetchKeywords])
 
   // Filter-dependent data: refetch when filters change
-  useEffect(() => {
-    if (activeCampaignId) {
-      fetchVideos(activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, selectedOwnership)
-    } else {
-      setLoading(false)
-    }
-  }, [activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, selectedOwnership, fetchVideos])
+  const leaderboardQuery = useQuery<unknown, Error, { data: VideoRow[]; total: number; channels: string[] }>({
+    queryKey: ['leaderboard', activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel, selectedOwnership],
+    queryFn: async () => {
+      let url = `/api/videos/leaderboard?campaign_id=${activeCampaignId}&tab=${tab}&sort=${sort}&page=${page}&limit=${PER_PAGE}`
+      if (selectedBrand) url += `&brand_name=${encodeURIComponent(selectedBrand)}`
+      if (selectedKeyword) url += `&keyword_id=${encodeURIComponent(selectedKeyword)}`
+      if (selectedChannel) url += `&channel_name=${encodeURIComponent(selectedChannel)}`
+      if (search.trim()) url += `&q=${encodeURIComponent(search.trim())}`
+      if (selectedOwnership !== 'all') url += `&is_ours=${selectedOwnership === 'ours' ? 'true' : 'false'}`
+      const res = await fetch(url)
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const videos = leaderboardQuery.data?.data ?? []
+  const total = leaderboardQuery.data?.total ?? 0
+  const channels = leaderboardQuery.data?.channels ?? []
 
   const handleToggleOwnership = async (video: VideoRow) => {
     const newVal = !video.is_ours
-    setVideos(prev => prev.map(v => v.id === video.id ? { ...v, is_ours: newVal } : v))
     try {
       await fetch('/api/videos/ownership', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ video_id: video.id, is_ours: newVal, campaign_id: activeCampaignId }),
       })
+      leaderboardQuery.refetch()
     } catch (e) {
-      setVideos(prev => prev.map(v => v.id === video.id ? { ...v, is_ours: !newVal } : v))
+      console.error(e)
     }
   }
 
   const handleUpdateTags = async (youtubeId: string, newTags: string[]) => {
     if (!activeCampaignId) return
     try {
-      setVideos(prev => prev.map(v => v.youtube_id === youtubeId ? { ...v, tags: newTags } : v))
-      
       await fetch('/api/videos/tags', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -201,6 +183,7 @@ export default function LeaderboardPage() {
           campaign_id: activeCampaignId,
         })
       })
+      leaderboardQuery.refetch()
     } catch (e) {
       console.error(e)
     }
@@ -218,9 +201,7 @@ export default function LeaderboardPage() {
       const result = await res.json()
       const analysis = result.results?.[0]
       if (analysis?.status === 'analyzed' && analysis.high_confidence_brands?.length > 0) {
-        const currentTags = videos.find(v => v.youtube_id === youtubeId)?.tags || []
-        const mergedTags = [...new Set([...currentTags, ...analysis.high_confidence_brands])]
-        setVideos(prev => prev.map(v => v.youtube_id === youtubeId ? { ...v, tags: mergedTags } : v))
+        leaderboardQuery.refetch()
       }
     } catch (e) {
       console.error('Auto analysis failed:', e)
@@ -241,7 +222,7 @@ export default function LeaderboardPage() {
       })
       const result = await res.json()
       // Refresh video list to get updated tags
-      fetchVideos(activeCampaignId, tab, sort, page, selectedBrand, selectedKeyword, search, selectedChannel)
+      leaderboardQuery.refetch()
     } catch (e) {
       console.error('Batch analysis failed:', e)
     } finally {
@@ -261,7 +242,7 @@ export default function LeaderboardPage() {
     const a = document.createElement('a'); a.href = url; a.download = `top_${tab}_videos.csv`; a.click()
   }
 
-  if (loading) {
+  if (leaderboardQuery.isLoading) {
     return (
       <div className="anim-fade-up">
         <PageSkeleton cols={4} rows={10} />

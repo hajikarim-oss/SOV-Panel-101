@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Loader2, Download } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { brandColor } from '@/lib/brand-colors'
 
 const RANGES = [
@@ -45,28 +45,28 @@ export default function TrendsTab() {
   const [chartType, setChartType] = useState<'area' | 'line'>('area')
   const [activeBrands, setActiveBrands] = useState<string[]>([])
   const [showAvg, setShowAvg] = useState(false)
-  const [data, setData] = useState<any[]>([])
-  const [brands, setBrands] = useState<string[]>([])
-  const [loading, setLoading] = useState(true)
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
   const [metric, setMetric] = useState<'views' | 'frequency'>('views')
 
-  const fetchTrend = useCallback(async (campId: string, d: string, o: string, m: string) => {
-    if (!campId) return
-    const ck = `trend-v3:${campId}:${d}:${o}:${m}`
-    const cached = getClientCache<any>(ck)
-    if (cached) { setBrands(cached.brands ?? []); setActiveBrands(cached.brands ?? []); setData(cached.data ?? []); setLoading(false); return }
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({ campaign_id: campId, days: d })
-      if (o !== 'all') params.set('is_ours', o === 'ours' ? 'true' : 'false')
-      if (m === 'frequency') params.set('metric', 'frequency')
-      const res = await fetch(`/api/sov-trend?${params}`); const json = await res.json()
-      setBrands(json.brands ?? []); setActiveBrands(json.brands ?? []); setData(json.data ?? []); setClientCache(ck, json)
-    } catch { /* ignore */ } finally { setLoading(false) }
-  }, [])
+  const trendTabQuery = useQuery({
+    queryKey: ['trends-tab', activeCampaignId, days, ownershipFilter, metric],
+    queryFn: async () => {
+      const params = new URLSearchParams({ campaign_id: activeCampaignId!, days })
+      if (ownershipFilter !== 'all') params.set('is_ours', ownershipFilter === 'ours' ? 'true' : 'false')
+      if (metric === 'frequency') params.set('metric', 'frequency')
+      const res = await fetch(`/api/sov-trend?${params}`)
+      if (!res.ok) throw new Error('Failed to fetch trend data')
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
 
-  useEffect(() => { if (activeCampaignId) fetchTrend(activeCampaignId, days, ownershipFilter, metric) }, [activeCampaignId, days, ownershipFilter, metric, fetchTrend])
+  const data = trendTabQuery.data?.data ?? []
+  const brands = trendTabQuery.data?.brands ?? []
+
+  useEffect(() => {
+    if (trendTabQuery.data?.brands) setActiveBrands(trendTabQuery.data.brands)
+  }, [trendTabQuery.data?.brands])
 
   const toggleBrand = (b: string) => setActiveBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
 
@@ -87,7 +87,7 @@ export default function TrendsTab() {
     const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'sov_trend.csv'; a.click()
   }
 
-  if (loading) return <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: 'var(--text-muted)' }}><Loader2 size={18} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} /> Loading…</div>
+  if (trendTabQuery.isLoading) return <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, color: 'var(--text-muted)' }}><Loader2 size={18} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} /> Loading…</div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

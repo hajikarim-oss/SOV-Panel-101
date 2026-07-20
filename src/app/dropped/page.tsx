@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Search, AlertCircle, Loader2, TrendingDown, Clock, Info } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
 
@@ -30,34 +31,22 @@ const COLORS = ['#1A73E8', '#10B981', '#F59E0B', '#8B5CF6', '#EF4444', '#06B6D4'
 export default function DroppedPage() {
   const { activeCampaignId, fetchCampaigns } = useCampaignStore()
   const [search, setSearch] = useState('')
-  const [data, setData] = useState<DroppedVideo[]>([])
-  const [source, setSource] = useState<'history' | 'fallback' | ''>('')
-  const [loading, setLoading] = useState(true)
 
-  const fetchDropped = useCallback(async (campId: string) => {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/videos/dropped?campaign_id=${campId}`)
+  const droppedQuery = useQuery({
+    queryKey: ['dropped', activeCampaignId],
+    queryFn: async () => {
+      const res = await fetch(`/api/videos/dropped?campaign_id=${activeCampaignId}`)
       const d = await res.json()
-      if (d.data) {
-        setData(d.data)
-        setSource(d.source ?? '')
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+      return d
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data = droppedQuery.data?.data ?? []
+  const source = droppedQuery.data?.source ?? ''
+  const loading = droppedQuery.isLoading
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) {
-      fetchDropped(activeCampaignId)
-    } else {
-      setLoading(false)
-    }
-  }, [activeCampaignId, fetchDropped])
 
   const filtered = data.filter(v =>
     !search.trim() ||

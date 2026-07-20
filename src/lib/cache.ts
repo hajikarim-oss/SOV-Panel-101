@@ -136,35 +136,7 @@ export async function getCachedSWR<T>(
   return getCached(key, fetcher, ttl)
 }
 
-// ── Client-side cache (localStorage, 5 min TTL) ───────────────────────────────
-const CLIENT_CACHE_PREFIX = 'sov_cache:'
-const CLIENT_CACHE_TTL = 5 * 60 * 1000
-
-export function getClientCache<T>(key: string): T | null {
-  try {
-    const raw = localStorage.getItem(CLIENT_CACHE_PREFIX + key)
-    if (!raw) return null
-    const { data, ts } = JSON.parse(raw)
-    if (Date.now() - ts > CLIENT_CACHE_TTL) {
-      localStorage.removeItem(CLIENT_CACHE_PREFIX + key)
-      return null
-    }
-    return data as T
-  } catch { return null }
-}
-
-export function setClientCache(key: string, data: unknown) {
-  try {
-    localStorage.setItem(CLIENT_CACHE_PREFIX + key, JSON.stringify({ data, ts: Date.now() }))
-  } catch {}
-}
-
-export function clearClientCache(pattern?: string) {
-  try {
-    const prefix = CLIENT_CACHE_PREFIX + (pattern || '')
-    Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k))
-  } catch {}
-}
+// ── Client-side cache removed — React Query handles client caching ─────────────
 
 // ── Cache Key Builder ─────────────────────────────────────────────────────────
 export const cacheKey = {
@@ -206,5 +178,4 @@ export async function invalidateCampaign(campaignId: string) {
       await redis.del(cacheKey.metadata())
     }
   } catch {}
-  clearClientCache(`campaign:${campaignId}`)
 }

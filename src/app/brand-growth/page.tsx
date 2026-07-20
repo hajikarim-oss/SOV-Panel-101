@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { TrendingUp, TrendingDown, Minus, Download, AlertCircle, RefreshCw, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine, Legend } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
@@ -57,38 +57,23 @@ export default function BrandGrowthPage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
   const [metric, setMetric] = useState<'views' | 'frequency'>('views')
   const [period, setPeriod] = useState<'24h' | '7d' | '30d'>('7d')
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<any[]>([])
-  const [hasScrapeData, setHasScrapeData] = useState(false)
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchGrowth = useCallback(async (campId: string, m: 'views' | 'frequency', p: string, o?: string) => {
-    if (!campId) return
-    const ownershipParam = o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''
-    const cacheKey = `growth:${campId}:${m}:${p}:${o ?? 'all'}`
-    const cached = getClientCache<any>(cacheKey)
-    if (cached) {
-      if (cached.data) setData(cached.data)
-      setHasScrapeData(cached.has_scrape_data ?? false)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/brands/growth?campaign_id=${campId}&metric=${m}&period=${p}${ownershipParam}`)
-      const d = await res.json()
-      if (d.data) setData(d.data)
-      setHasScrapeData(d.has_scrape_data ?? false)
-      setClientCache(cacheKey, d)
-    } catch (e) { console.error(e) }
-    finally { setLoading(false) }
-  }, [])
+  const ownershipParam = ownershipFilter && ownershipFilter !== 'all' ? `&is_ours=${ownershipFilter === 'ours'}` : ''
+  const growthQuery = useQuery({
+    queryKey: ['brand-growth', activeCampaignId, metric, period, ownershipFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/brands/growth?campaign_id=${activeCampaignId}&metric=${metric}&period=${period}${ownershipParam}`)
+      if (!res.ok) throw new Error('Failed to fetch growth data')
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+  const data = growthQuery.data?.data ?? []
+  const hasScrapeData = growthQuery.data?.has_scrape_data ?? false
+  const loading = growthQuery.isLoading
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) fetchGrowth(activeCampaignId, metric, period, ownershipFilter)
-    else setLoading(false)
-  }, [activeCampaignId, metric, period, ownershipFilter, fetchGrowth])
 
   const handleExport = () => {
     const headers = 'Brand,Current Value,Previous Value,Growth %,Videos Tracked'

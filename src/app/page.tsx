@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Eye, BarChart2, RefreshCw, ChevronUp, ChevronDown, Loader2, Play,
   ArrowUpRight, Zap, Video, Search, Award, Layers, Users, AlertCircle,
@@ -15,7 +16,6 @@ import {
 } from 'recharts'
 import Link from 'next/link'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
 import { languageRegions } from '@/lib/india-regions'
 import IndiaMap from '@/components/IndiaMap'
 import VideosTab from '@/components/tabs/VideosTab'
@@ -351,8 +351,6 @@ export default function OverviewPage() {
   const [regionalApiStats, setRegionalApiStats] = useState<Record<string, number>>({})
   const [regionalApiCounts, setRegionalApiCounts] = useState<Record<string, number>>({})
   const [totalRegionalViews, setTotalRegionalViews] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [hasData, setHasData] = useState(false)
   const [timeRange, setTimeRange] = useState<'7' | '14' | '30'>('14')
   const [activeTab, setActiveTab] = useState<'overview' | 'brands' | 'creators' | 'rankings' | 'videos' | 'keywords' | 'trends' | 'growth' | 'alerts' | 'settings'>('overview')
@@ -388,73 +386,37 @@ export default function OverviewPage() {
 
   const campaign = campaigns.find(c => c.id === activeCampaignId)
 
-  const fetchAll = useCallback(async (campId: string, isOurs?: string) => {
-    if (!campId) return
-    // v7 cache key — bumped to flush any stale/corrupted v6 entries from localStorage
-    const ckFull = `overview:v7:${campId}:${isOurs || 'all'}`
-    const cached = getClientCache<any>(ckFull)
-    if (cached && cached.overview) {
-      setOverview(cached.overview)
-      setKeywords(cached.keywords ?? [])
-      setVideos(cached.videos ?? [])
-      setRegionalApiStats(cached.regionalStats || {})
-      setRegionalApiCounts(cached.regionalCounts || {})
-      setTotalRegionalViews(cached.totalRegionalViews || 0)
-      setHasData(!cached.overview?.error && (cached.overview?.totalVideos ?? 0) > 0)
-      setLoading(false)
-      return
+  const isOursParam = ownershipFilter && ownershipFilter !== 'all' ? `&is_ours=${ownershipFilter}` : ''
+
+  const dashboardQuery = useQuery({
+    queryKey: ['dashboard', activeCampaignId, ownershipFilter],
+    queryFn: async () => {
+      const [kpisRes, fullRes] = await Promise.all([
+        fetch(`/api/dashboard/kpis?campaign_id=${activeCampaignId}`),
+        fetch(`/api/dashboard?campaign_id=${activeCampaignId}${isOursParam}`),
+      ])
+      const kpis = kpisRes.ok ? await kpisRes.json() : null
+      const d = await fullRes.json()
+      return { kpis, ...d }
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  useEffect(() => {
+    if (dashboardQuery.data) {
+      const d = dashboardQuery.data
+      const ov = d.overview || d.kpis
+      if (ov) setOverview(ov)
+      setKeywords(d.keywords ?? [])
+      setVideos(d.topVideos ?? [])
+      setRegionalApiStats(d.regionalStats || {})
+      setRegionalApiCounts(d.regionalVideoCounts || {})
+      setTotalRegionalViews(d.totalRegionalViews || 0)
+      setHasData(!ov?.error && (ov?.totalVideos ?? 0) > 0)
     }
-
-    setLoading(true)
-    const isOursParam = isOurs && isOurs !== 'all' ? `&is_ours=${isOurs}` : ''
-
-    // ── Phase 1: Fast KPIs (~300ms) ─────────────────────────────────────────
-    // Fetches KPI cards from the lightweight endpoint first so users see numbers
-    // almost instantly while the full dataset loads in the background.
-    try {
-      const kpisRes = await fetch(`/api/dashboard/kpis?campaign_id=${campId}`)
-      if (kpisRes.ok) {
-        const kpis = await kpisRes.json()
-        if (kpis && !kpis.error) {
-          setOverview(kpis)
-          setHasData((kpis.totalVideos ?? 0) > 0)
-          setLoading(false)  // Show KPI cards immediately — don't wait for full data
-        }
-      }
-    } catch { /* KPIs fetch failed — full fetch will handle it */ }
-
-    // ── Phase 2: Full dashboard data (charts + videos, 1–5s) ────────────────
-    try {
-      const res = await fetch(`/api/dashboard?campaign_id=${campId}${isOursParam}`)
-      const d = await res.json()
-      // Guard: only update state if we got a valid response
-      if (d && d.overview) {
-        setOverview(d.overview)
-        setKeywords(d.keywords ?? [])
-        setVideos(d.topVideos ?? [])
-        setRegionalApiStats(d.regionalStats || {})
-        setRegionalApiCounts(d.regionalVideoCounts || {})
-        setTotalRegionalViews(d.totalRegionalViews || 0)
-        setHasData(!d.overview?.error && (d.overview?.totalVideos ?? 0) > 0)
-        // Only cache valid responses — never cache error/undefined overview
-        setClientCache(ckFull, {
-          overview: d.overview,
-          keywords: d.keywords ?? [],
-          videos: d.topVideos ?? [],
-          regionalStats: d.regionalStats || {},
-          regionalCounts: d.regionalVideoCounts || {},
-          totalRegionalViews: d.totalRegionalViews || 0,
-        })
-      }
-    } catch { setHasData(false) }
-    finally { setLoading(false) }
-  }, [])
+  }, [dashboardQuery.data])
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) fetchAll(activeCampaignId, ownershipFilter)
-    else if (campaigns.length === 0) setLoading(false)
-  }, [activeCampaignId, campaigns.length, fetchAll, ownershipFilter])
 
   // Extract distinct values for filter selectors
   const distinctLanguages = useMemo(() => {
@@ -870,10 +832,10 @@ export default function OverviewPage() {
               <button key={r} onClick={() => setTimeRange(r)} style={{ padding: '6px 12px', fontSize: 11.5, fontWeight: 600, background: timeRange === r ? '#1A73E8' : 'transparent', color: timeRange === r ? '#FFF' : '#64748B', border: 'none', cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s' }}>{r}d</button>
             ))}
           </div>
-          <button onClick={async () => { setRefreshing(true); await fetchAll(activeCampaignId, ownershipFilter); setRefreshing(false) }} disabled={refreshing}
+          <button onClick={() => dashboardQuery.refetch()} disabled={dashboardQuery.isRefetching}
             style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 8, border: '1px solid #E2E8F0', background: '#FFF', color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-            <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-            {refreshing ? 'Refreshing…' : 'Refresh'}
+            <RefreshCw size={12} style={{ animation: dashboardQuery.isRefetching ? 'spin 1s linear infinite' : 'none' }} />
+            {dashboardQuery.isRefetching ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>

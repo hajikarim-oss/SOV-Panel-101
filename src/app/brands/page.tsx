@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import { Loader2, Eye, Hash, TrendingUp, Award, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
@@ -44,38 +44,24 @@ function CustomTooltip({ active, payload }: any) {
 
 export default function BrandIntelligencePage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
-  const [brands, setBrands] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
   const [sortBy, setSortBy] = useState<'views' | 'freq'>('views')
-  const [hasData, setHasData] = useState(false)
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchData = useCallback(async (o?: string) => {
-    if (!activeCampaignId) return
-    const cached = getClientCache<any>(`brands:${activeCampaignId}:${o || 'all'}`)
-    if (cached) {
-      setBrands(cached.data || [])
-      setHasData(cached.has_scrape_data || false)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const isOursParam = o === 'ours' ? '&is_ours=true' : o === 'theirs' ? '&is_ours=false' : ''
+  const isOursParam = ownershipFilter === 'ours' ? '&is_ours=true' : ownershipFilter === 'theirs' ? '&is_ours=false' : ''
+
+  const brandsQuery = useQuery({
+    queryKey: ['brands', activeCampaignId, ownershipFilter],
+    queryFn: async () => {
       const res = await fetch(`/api/brands?campaign_id=${activeCampaignId}${isOursParam}`)
-      const d = await res.json()
-      setBrands(d.data || [])
-      setHasData(d.has_scrape_data || false)
-      setClientCache(`brands:${activeCampaignId}:${o || 'all'}`, d)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
-  }, [activeCampaignId])
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const brands = brandsQuery.data?.data ?? []
+  const hasData = brandsQuery.data?.has_scrape_data ?? false
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => { fetchData(ownershipFilter) }, [fetchData, ownershipFilter])
 
   const sortedBrands = [...brands].sort((a, b) =>
     sortBy === 'views' ? (b.total_views || 0) - (a.total_views || 0) : (b.total_frequency || 0) - (a.total_frequency || 0)
@@ -120,7 +106,7 @@ export default function BrandIntelligencePage() {
         </div>
       </div>
 
-      {loading ? (
+      {brandsQuery.isLoading ? (
         <PageSkeleton cols={4} rows={5} />
       ) : sortedBrands.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>

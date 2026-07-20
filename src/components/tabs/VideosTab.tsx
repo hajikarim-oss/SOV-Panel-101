@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { brandColor } from '@/lib/brand-colors'
 
 function fmt(n: number | null | undefined): string {
@@ -58,10 +58,7 @@ function fmtRelative(iso: string | null): string {
 
 export default function VideosTab() {
   const { activeCampaignId, campaigns } = useCampaignStore()
-  const [videos, setVideos] = useState<any[]>([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<'views' | 'rank' | 'date' | 'channel'>('views')
   const [tab, setTab] = useState<'long' | 'short'>('long')
@@ -69,8 +66,6 @@ export default function VideosTab() {
   const [channelFilter, setChannelFilter] = useState('all')
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
   const [showFilters, setShowFilters] = useState(false)
-  const [channels, setChannels] = useState<string[]>([])
-  const [brands, setBrands] = useState<string[]>([])
   const [showAll, setShowAll] = useState(false)
 
   // Add video by URL state
@@ -93,49 +88,39 @@ export default function VideosTab() {
   const limit = 20
   const campaign = campaigns.find(c => c.id === activeCampaignId)
 
-  const fetchVideos = useCallback(async (campId: string, p: number, s: string, q: string) => {
-    if (!campId) return
-    const cacheKey = `videos-tab-v3:${campId}:${p}:${s}:${q}:${tab}:${brandFilter}:${channelFilter}:${ownershipFilter}:${showAll}`
-    const cached = getClientCache<any>(cacheKey)
-    if (cached) {
-      setVideos(cached.data ?? [])
-      setTotal(cached.total ?? 0)
-      setChannels(cached.channels ?? [])
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
+  const videosQuery = useQuery({
+    queryKey: ['videos-tab', activeCampaignId, page, sort, search, tab, brandFilter, channelFilter, ownershipFilter, showAll],
+    queryFn: async () => {
       if (showAll) {
-        // Fetch all campaign videos
-        const params = new URLSearchParams({ campaign_id: campId, page: String(p), limit: String(limit), sort: s })
-        if (q) params.set('q', q)
+        const params = new URLSearchParams({ campaign_id: activeCampaignId!, page: String(page), limit: String(limit), sort })
+        if (search) params.set('q', search)
         const res = await fetch(`/api/videos/campaign?${params}`)
-        const d = await res.json()
-        setVideos(d.data ?? [])
-        setTotal(d.total ?? 0)
-        setClientCache(cacheKey, d)
+        return res.json()
       } else {
         const params = new URLSearchParams({
-          campaign_id: campId, sort: s, tab, page: String(p), limit: String(limit),
+          campaign_id: activeCampaignId!, sort, tab, page: String(page), limit: String(limit),
         })
-        if (q) params.set('q', q)
+        if (search) params.set('q', search)
         if (brandFilter !== 'all') params.set('brand_name', brandFilter)
         if (channelFilter !== 'all') params.set('channel_name', channelFilter)
         if (ownershipFilter !== 'all') params.set('is_ours', ownershipFilter === 'ours' ? 'true' : 'false')
         const res = await fetch(`/api/videos/leaderboard?${params}`)
-        const d = await res.json()
-        setVideos(d.data ?? [])
-        setTotal(d.total ?? 0)
-        setChannels(d.channels ?? [])
-        setClientCache(cacheKey, d)
-        const allBrands = new Set<string>()
-        for (const v of (d.data ?? [])) for (const b of (v.brands ?? [])) allBrands.add(b)
-        setBrands(Array.from(allBrands).sort())
+        return res.json()
       }
-    } catch { /* ignore */ }
-    finally { setLoading(false) }
-  }, [tab, brandFilter, channelFilter, ownershipFilter, showAll])
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const videos = videosQuery.data?.data ?? []
+  const total = videosQuery.data?.total ?? 0
+  const channels = videosQuery.data?.channels ?? []
+  const loading = videosQuery.isLoading
+
+  const brands = useMemo(() => {
+    const allBrands = new Set<string>()
+    for (const v of videos) for (const b of (v.brands ?? [])) allBrands.add(b)
+    return Array.from(allBrands).sort()
+  }, [videos])
 
   // Fetch daily gain for current page videos
   const fetchDailyGain = useCallback(async (videoIds: string[], campId: string) => {
@@ -151,12 +136,6 @@ export default function VideosTab() {
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => {
-    if (activeCampaignId) {
-      fetchVideos(activeCampaignId, page, sort, search)
-    }
-  }, [activeCampaignId, page, sort, fetchVideos])
-
   // Fetch daily gain when videos change
   useEffect(() => {
     if (activeCampaignId && videos.length > 0) {
@@ -165,7 +144,7 @@ export default function VideosTab() {
     }
   }, [videos, activeCampaignId, fetchDailyGain])
 
-  const handleSearch = () => { setPage(1); if (activeCampaignId) fetchVideos(activeCampaignId, 1, sort, search) }
+  const handleSearch = () => { setPage(1) }
   const totalPages = Math.ceil(total / limit)
 
   const addVideoByUrl = async () => {
@@ -182,7 +161,7 @@ export default function VideosTab() {
         setAddResult({ msg: d.message || 'Video added!', type: 'success' })
         setAddUrl(''); setAddTags('')
         setTimeout(() => { setAddResult(null); setShowAddUrl(false) }, 1500)
-        setPage(1); fetchVideos(activeCampaignId, 1, sort, search)
+        setPage(1); videosQuery.refetch()
       } else setAddResult({ msg: d.error || 'Failed', type: 'error' })
     } catch { setAddResult({ msg: 'Network error', type: 'error' }) }
     finally { setAddingVideo(false) }
@@ -196,7 +175,7 @@ export default function VideosTab() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ video_id: videoId, is_ours: !current, campaign_id: activeCampaignId }),
       })
-      setVideos(prev => prev.map(v => v.id === videoId ? { ...v, is_ours: !current } : v))
+      videosQuery.refetch()
     } catch { /* ignore */ }
     finally { setTogglingOwnership(null) }
   }
@@ -208,7 +187,7 @@ export default function VideosTab() {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ youtube_id: youtubeId, tags, campaign_id: activeCampaignId }),
       })
-      setVideos(prev => prev.map(v => v.youtube_id === youtubeId ? { ...v, brands: tags } : v))
+      videosQuery.refetch()
       setEditingTags(null)
     } catch { /* ignore */ }
   }

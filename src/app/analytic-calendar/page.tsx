@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   ChevronLeft, ChevronRight, Eye, Video, Hash, TrendingUp, TrendingDown,
   Zap, BarChart2, Download, AlertCircle, Loader2, Calendar, ArrowUpRight,
   ArrowDownRight, Minus, X
 } from 'lucide-react'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
 
@@ -68,47 +68,28 @@ interface DayData {
 
 export default function AnalyticCalendarPage() {
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
-  const [loading, setLoading] = useState(true)
   const [currentMonth, setCurrentMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
-  const [days, setDays] = useState<DayData[]>([])
-  const [summary, setSummary] = useState<any>(null)
-  const [monthLabel, setMonthLabel] = useState('')
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null)
   const [showDetail, setShowDetail] = useState(false)
 
-  const fetchData = useCallback(async (campId: string, month: string) => {
-    if (!campId) return
-    const cacheKey = `analytics-cal:${campId}:${month}`
-    const cached = getClientCache<any>(cacheKey)
-    if (cached) {
-      setDays(cached.days || [])
-      setSummary(cached.summary || null)
-      setMonthLabel(cached.monthLabel || '')
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/analytic-calendar?campaign_id=${campId}&month=${month}`)
-      const d = await res.json()
-      if (d.days) {
-        setDays(d.days)
-        setSummary(d.summary)
-        setMonthLabel(d.monthLabel)
-        setClientCache(cacheKey, d)
-      }
-    } catch (e) { console.error(e) }
-    finally { setLoading(false) }
-  }, [])
+  const calendarQuery = useQuery({
+    queryKey: ['analytic-calendar', activeCampaignId, currentMonth],
+    queryFn: async () => {
+      const res = await fetch(`/api/analytic-calendar?campaign_id=${activeCampaignId}&month=${currentMonth}`)
+      if (!res.ok) throw new Error('Failed to fetch calendar data')
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const days = calendarQuery.data?.days ?? []
+  const summary = calendarQuery.data?.summary ?? null
+  const monthLabel = calendarQuery.data?.monthLabel ?? ''
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) fetchData(activeCampaignId, currentMonth)
-    else setLoading(false)
-  }, [activeCampaignId, currentMonth, fetchData])
 
   const navigateMonth = (dir: number) => {
     const [y, m] = currentMonth.split('-').map(Number)
@@ -141,7 +122,7 @@ export default function AnalyticCalendarPage() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  if (!activeCampaignId && !loading) {
+  if (!activeCampaignId && !calendarQuery.isLoading) {
     return (
       <div className="anim-fade-up">
         <div className="page-header">
@@ -252,7 +233,7 @@ export default function AnalyticCalendarPage() {
 
             {/* Calendar Days */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-              {loading ? (
+              {calendarQuery.isLoading ? (
                 Array.from({ length: 35 }).map((_, i) => (
                   <div key={i} style={{ height: 100, borderRadius: 10, background: '#F8FAFC', border: '1px solid #F1F5F9', animation: 'fadeIn 0.3s ease', animationDelay: `${i * 20}ms` }} />
                 ))

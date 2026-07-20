@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { TrendingUp, TrendingDown, Minus, Download, Loader2 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { brandColor } from '@/lib/brand-colors'
 
 function fmt(n: number | null | undefined) {
@@ -37,25 +37,23 @@ export default function GrowthTab() {
   const { activeCampaignId } = useCampaignStore()
   const [metric, setMetric] = useState<'views' | 'frequency'>('views')
   const [period, setPeriod] = useState<'24h' | '7d' | '30d'>('7d')
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<any[]>([])
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
   const [sortBy, setSortBy] = useState<SortKey>('growth')
 
-  const fetchGrowth = useCallback(async (campId: string, m: string, p: string, o: string) => {
-    if (!campId) return
-    const ck = `growth-v3:${campId}:${m}:${p}:${o}`
-    const cached = getClientCache<any>(ck)
-    if (cached) { setData(cached.data ?? []); setLoading(false); return }
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({ campaign_id: campId, metric: m, period: p })
-      if (o !== 'all') params.set('is_ours', o === 'ours' ? 'true' : 'false')
-      const res = await fetch(`/api/brands/growth?${params}`); const d = await res.json(); setData(d.data ?? []); setClientCache(ck, d)
-    } catch { /* ignore */ } finally { setLoading(false) }
-  }, [])
+  const growthTabQuery = useQuery({
+    queryKey: ['growth-tab', activeCampaignId, metric, period, ownershipFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams({ campaign_id: activeCampaignId!, metric, period })
+      if (ownershipFilter !== 'all') params.set('is_ours', ownershipFilter === 'ours' ? 'true' : 'false')
+      const res = await fetch(`/api/brands/growth?${params}`)
+      const d = await res.json()
+      return (d.data ?? []) as any[]
+    },
+    enabled: !!activeCampaignId,
+  })
 
-  useEffect(() => { if (activeCampaignId) fetchGrowth(activeCampaignId, metric, period, ownershipFilter) }, [activeCampaignId, metric, period, ownershipFilter, fetchGrowth])
+  const data = growthTabQuery.data ?? []
+  const loading = growthTabQuery.isLoading
 
   const sorted = useMemo(() => {
     const arr = [...data]; arr.sort((a, b) => { switch (sortBy) { case 'growth': return b.growthPercent - a.growthPercent; case 'name': return a.brand_name.localeCompare(b.brand_name); case 'current': return b.currentValue - a.currentValue; default: return 0 } }); return arr

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import AppShell from '@/components/AppShell'
 import PreWarm from '@/components/PreWarm'
+import Providers from '@/components/Providers'
 
 export const metadata: Metadata = {
   title: 'SOV Panel — YouTube Share-of-Voice | TheBoredMonkey',
@@ -12,8 +13,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <PreWarm />
-        <AppShell>{children}</AppShell>
+        <Providers>
+          <PreWarm />
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   )

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, use } from 'react'
+import { use } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
 import { ChevronLeft, Loader2, AlertCircle, Eye, Video, TrendingUp, HelpCircle } from 'lucide-react'
@@ -22,32 +23,20 @@ export default function BrandDetailPage({ params }: { params: Promise<Params> })
   const { brandName } = use(params)
   const decodedBrandName = decodeURIComponent(brandName)
   const { activeCampaignId } = useCampaignStore()
-  const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchBrandDetails = useCallback(async (campId: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/brands/${encodeURIComponent(decodedBrandName)}?campaign_id=${campId}`)
+  const brandQuery = useQuery({
+    queryKey: ['brand-detail', activeCampaignId, decodedBrandName],
+    queryFn: async () => {
+      const res = await fetch(`/api/brands/${encodeURIComponent(decodedBrandName)}?campaign_id=${activeCampaignId}`)
       const d = await res.json()
       if (d.error) throw new Error(d.error)
-      setData(d)
-    } catch (e: any) {
-      setError(e.message || 'Failed to load brand metrics')
-    } finally {
-      setLoading(false)
-    }
-  }, [decodedBrandName])
+      return d
+    },
+    enabled: !!activeCampaignId,
+  })
 
-  useEffect(() => {
-    if (activeCampaignId) {
-      fetchBrandDetails(activeCampaignId)
-    } else {
-      setLoading(false)
-    }
-  }, [activeCampaignId, fetchBrandDetails])
+  const data = brandQuery.data as any
+  const loading = brandQuery.isLoading
+  const error = brandQuery.error?.message as string | null
 
   if (loading) {
     return (

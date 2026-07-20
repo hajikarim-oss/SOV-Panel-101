@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { getClientCache, setClientCache } from '@/lib/cache'
 
 export interface Campaign {
   id: string
@@ -34,19 +33,7 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
 
   fetchCampaigns: async () => {
     const state = get()
-    // Already fetched — skip
     if (state._campaignsFetched && state.campaigns.length > 0) return
-
-    // Try client cache first
-    const cached = getClientCache<Campaign[]>('campaigns')
-    if (cached && cached.length > 0) {
-      set({
-        campaigns: cached,
-        _campaignsFetched: true,
-        activeCampaignId: state.activeCampaignId || cached[0].id,
-      })
-      return
-    }
 
     try {
       const r = await fetch('/api/campaigns')
@@ -55,8 +42,6 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
       if (!contentType.includes('application/json')) return
       const d = await r.json()
       const camps: Campaign[] = d.campaigns ?? []
-
-      setClientCache('campaigns', camps)
 
       set((prev) => ({
         campaigns: camps,

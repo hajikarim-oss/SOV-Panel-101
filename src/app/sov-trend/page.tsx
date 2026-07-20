@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import {
   AreaChart, Area, LineChart, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell,
 } from 'recharts'
 import { useCampaignStore } from '@/lib/store'
-import { getClientCache, setClientCache } from '@/lib/cache'
+import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, TrendingUp, TrendingDown, RefreshCw, ChevronUp, ChevronDown, Download } from 'lucide-react'
 import { PageSkeleton } from '@/components/PageSkeleton'
 import Link from 'next/link'
@@ -84,44 +84,30 @@ export default function SovTrendPage() {
   const [chartType, setChartType] = useState<'area' | 'line'>('area')
   const [activeBrands, setActiveBrands] = useState<string[]>([])
   const [showAvg, setShowAvg] = useState(false)
-  const [data, setData] = useState<any[]>([])
-  const [brands, setBrands] = useState<string[]>([])
-  const [hasScrapeData, setHasScrapeData] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [ownershipFilter, setOwnershipFilter] = useState<'all' | 'ours' | 'theirs'>('all')
 
-  const fetchTrend = useCallback(async (campId: string, d: string, o?: string) => {
-    if (!campId) return
-    const ck = `trend:${campId}:${d}:${o ?? 'all'}`
-    const cached = getClientCache<any>(ck)
-    if (cached) {
-      const b: string[] = cached.brands ?? []
-      setBrands(b)
-      setActiveBrands(b)
-      setData(cached.data ?? [])
-      setHasScrapeData(cached.has_scrape_data ?? false)
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/sov-trend?campaign_id=${campId}&days=${d}${o && o !== 'all' ? `&is_ours=${o === 'ours'}` : ''}`)
-      const json = await res.json()
-      const b: string[] = json.brands ?? []
-      setBrands(b)
-      setActiveBrands(b)
-      setData(json.data ?? [])
-      setHasScrapeData(json.has_scrape_data ?? false)
-      setClientCache(ck, json)
-    } catch (e) { console.error(e) }
-    finally { setLoading(false) }
-  }, [])
+  const ownershipParam = ownershipFilter && ownershipFilter !== 'all' ? `&is_ours=${ownershipFilter === 'ours'}` : ''
+
+  const trendQuery = useQuery({
+    queryKey: ['sov-trend', activeCampaignId, days, ownershipFilter],
+    queryFn: async () => {
+      const res = await fetch(`/api/sov-trend?campaign_id=${activeCampaignId}&days=${days}${ownershipParam}`)
+      if (!res.ok) throw new Error('Failed to fetch trend data')
+      return res.json()
+    },
+    enabled: !!activeCampaignId,
+  })
+
+  const data = trendQuery.data?.data ?? []
+  const brands: string[] = trendQuery.data?.brands ?? []
+  const hasScrapeData = trendQuery.data?.has_scrape_data ?? false
+  const loading = trendQuery.isLoading
+
+  useEffect(() => {
+    if (brands.length > 0) setActiveBrands(brands)
+  }, [brands])
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
-  useEffect(() => {
-    if (activeCampaignId) fetchTrend(activeCampaignId, days, ownershipFilter)
-    else setLoading(false)
-  }, [activeCampaignId, days, ownershipFilter, fetchTrend])
 
   const toggleBrand = (b: string) =>
     setActiveBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b])
