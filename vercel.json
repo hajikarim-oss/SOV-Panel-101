@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/warm",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/cron?job=daily_views",
