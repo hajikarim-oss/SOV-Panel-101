@@ -7,7 +7,7 @@ export const maxDuration = 60
 
 export async function POST(req: NextRequest) {
   try {
-    const { campaign_id, keyword_id } = await req.json()
+    const { campaign_id, keyword_id, limit = 2 } = await req.json()
     if (!campaign_id) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const kwFilter = keyword_id ? `AND id = $2` : ''
@@ -24,16 +24,17 @@ export async function POST(req: NextRequest) {
     }
 
     const keys = await queryAll<any>(
-      `SELECT id FROM api_keys WHERE is_active = TRUE AND units_limit >= 100`
+      `SELECT id FROM api_keys WHERE is_active = TRUE AND (units_used + 100) <= units_limit`
     )
 
     if (!keys || keys.length === 0) {
       return NextResponse.json({ error: 'NO_API_KEYS: All API keys are exhausted for today' }, { status: 503 })
     }
 
-    const results: Array<{ keyword: string; ranked: number; quota_cost: number; error?: string }> = []
+    const batch = keywords.slice(0, Math.min(limit, keywords.length))
+    const remaining = keywords.length - batch.length
 
-    for (const kw of keywords) {
+    const scrapeJobs = batch.map(async (kw: any) => {
       const jobId = `scrape-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 
       await queryAll(
@@ -48,24 +49,30 @@ export async function POST(req: NextRequest) {
           `UPDATE scrape_jobs SET status = 'completed', results_count = $1, quota_used = $2, completed_at = $3 WHERE id = $4`,
           [result.ranked, result.quota_cost, new Date().toISOString(), jobId]
         )
-        results.push({ keyword: kw.text, ranked: result.ranked, quota_cost: result.quota_cost })
+        return { keyword: kw.text, ranked: result.ranked, quota_cost: result.quota_cost }
       } catch (err: any) {
         console.error(`Scrape failed for keyword "${kw.text}":`, err)
         await queryAll(
           `UPDATE scrape_jobs SET status = 'failed', error_msg = $1, completed_at = $2 WHERE id = $3`,
           [err.message?.substring(0, 500) || 'Unknown error', new Date().toISOString(), jobId]
         )
-        results.push({ keyword: kw.text, ranked: 0, quota_cost: 0, error: err.message?.substring(0, 200) })
+        return { keyword: kw.text, ranked: 0, quota_cost: 0, error: err.message?.substring(0, 200) }
       }
-    }
+    })
+
+    const results = await Promise.all(scrapeJobs)
 
     const totalRanked = results.reduce((s, r) => s + r.ranked, 0)
     const totalQuota = results.reduce((s, r) => s + r.quota_cost, 0)
 
     return NextResponse.json({
       ok: true,
-      message: `Scraped ${results.length} keyword(s): ${totalRanked} videos ranked, ${totalQuota} quota units used.`,
+      message: remaining > 0
+        ? `Scraped ${results.length} of ${keywords.length} keyword(s). ${remaining} remaining — call again to continue.`
+        : `Scraped ${results.length} keyword(s): ${totalRanked} videos ranked, ${totalQuota} quota units used.`,
       results,
+      remaining,
+      total: keywords.length,
     })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'

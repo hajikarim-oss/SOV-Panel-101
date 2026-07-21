@@ -334,21 +334,41 @@ export default function ControlPage() {
 
   const triggerScrape = async (keywordId?: string) => {
     if (!activeCampaign) return
-    const kw = keywords.find(k => k.id === keywordId)
-    const msg = kw ? `Scraping "${kw.text}"…` : `Scraping all ${keywords.filter(k=>k.status==='active').length} active keywords…`
     setScraping(true)
-    showToast(msg, 'info')
-    try {
-      const r = await fetch('/api/scrape', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: activeCampaign, keyword_id: keywordId }),
-      })
-      const d = await r.json()
-      if (!r.ok) return showToast(d.error, 'error')
-      showToast(d.message, 'info')
-      await fetchCampaignDetail(activeCampaign)
-    } catch { showToast('Scrape failed', 'error') }
-    finally { setScraping(false) }
+
+    if (keywordId) {
+      const kw = keywords.find(k => k.id === keywordId)
+      showToast(`Scraping "${kw?.text}"…`, 'info')
+      try {
+        const r = await fetch('/api/scrape', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ campaign_id: activeCampaign, keyword_id: keywordId, limit: 1 }),
+        })
+        const d = await r.json()
+        if (!r.ok) return showToast(d.error, 'error')
+        showToast(d.message, 'info')
+      } catch { showToast('Scrape failed', 'error') }
+    } else {
+      const active = keywords.filter(k => k.status === 'active')
+      let done = 0
+      showToast(`Scraping ${active.length} keywords in batches of 2…`, 'info')
+      try {
+        while (done < active.length) {
+          const r = await fetch('/api/scrape', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ campaign_id: activeCampaign, limit: 2 }),
+          })
+          const d = await r.json()
+          if (!r.ok) { showToast(d.error, 'error'); break }
+          done += d.results?.length || 0
+          if (d.remaining > 0) showToast(`Progress: ${done}/${active.length} scraped…`, 'info')
+          else { showToast(d.message, 'info'); break }
+        }
+      } catch { showToast('Scrape failed', 'error') }
+    }
+
+    await fetchCampaignDetail(activeCampaign)
+    setScraping(false)
   }
 
   const addApiKey = async () => {
