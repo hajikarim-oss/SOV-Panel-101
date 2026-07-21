@@ -48,24 +48,29 @@ export function isShortForm(durationSec: number): boolean {
   return durationSec > 0 && durationSec <= 60
 }
 
-// ── Key Rotation — decrypts key before use ─────────────────────────
+// ── Key Rotation — atomic select + reserve ──────────────────────────
 export function getNextAvailableKey(minUnits = 100): { api_key: string; key_id: string } | null {
   const db = getDb()
   const today = new Date().toISOString().split('T')[0]
 
+  // Reset expired keys first
   db.prepare(`
-    UPDATE api_keys
-    SET units_used = 0, reset_date = ?
+    UPDATE api_keys SET units_used = 0, reset_date = ?
     WHERE reset_date < ? AND is_active = 1
   `).run(today, today)
 
+  // Atomic: select the least-used key AND reserve capacity in one statement
   const key = db.prepare(`
-    SELECT id, api_key FROM api_keys
-    WHERE is_active = 1
-      AND (units_used + ?) <= units_limit
-    ORDER BY units_used ASC
-    LIMIT 1
-  `).get(minUnits) as { id: string; api_key: string } | undefined
+    UPDATE api_keys
+    SET units_used = units_used + ?, last_used_at = datetime('now')
+    WHERE id = (
+      SELECT id FROM api_keys
+      WHERE is_active = 1 AND (units_used + ?) <= units_limit
+      ORDER BY units_used ASC
+      LIMIT 1
+    )
+    RETURNING id, api_key
+  `).get(minUnits, minUnits) as { id: string; api_key: string } | undefined
 
   if (!key) return null
 
@@ -79,11 +84,10 @@ export function getNextAvailableKey(minUnits = 100): { api_key: string; key_id: 
   return { api_key: decryptedKey, key_id: key.id }
 }
 
-function consumeQuota(key_id: string, units: number) {
+function refundQuota(key_id: string, units: number) {
   const db = getDb()
   db.prepare(`
-    UPDATE api_keys
-    SET units_used = units_used + ?, last_used_at = datetime('now')
+    UPDATE api_keys SET units_used = MAX(0, units_used - ?), last_used_at = datetime('now')
     WHERE id = ?
   `).run(units, key_id)
 }
@@ -95,15 +99,20 @@ function markKeyExhausted(key_id: string) {
 
 async function youtubeFetch(url: URL, key_id: string, quotaUnits: number) {
   const res = await fetch(url.toString())
-  consumeQuota(key_id, quotaUnits)
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     const errMsg = (err as { error?: { message?: string } })?.error?.message ?? res.statusText
-    if (res.status === 403 || res.status === 429) markKeyExhausted(key_id)
+    if (res.status === 403 || res.status === 429) {
+      markKeyExhausted(key_id)
+    } else {
+      // Refund quota for non-quota errors (400, 500, network, etc.)
+      refundQuota(key_id, quotaUnits)
+    }
     throw new Error(`YouTube API error: ${errMsg}`)
   }
 
+  // Quota only counts on success — already pre-reserved in getNextAvailableKey
   return res.json()
 }
 

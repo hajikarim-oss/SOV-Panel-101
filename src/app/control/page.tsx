@@ -155,7 +155,7 @@ export default function ControlPage() {
 
   // ── New API Key form ──
   const [showAddKey, setShowAddKey] = useState(false)
-  const [newKey, setNewKey] = useState({ label: '', api_key: '', bucket: '1', units_limit: '10000' })
+  const [newKey, setNewKey] = useState({ label: '', api_key: '', units_limit: '10000' })
   const [keyVisible, setKeyVisible] = useState(false)
 
   const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
@@ -360,13 +360,12 @@ export default function ControlPage() {
         body: JSON.stringify({
           label: newKey.label,
           api_key: newKey.api_key,
-          bucket: parseInt(newKey.bucket),
           units_limit: parseInt(newKey.units_limit),
         }),
       })
       const d = await r.json()
       if (!r.ok) return showToast(d.error, 'error')
-      setNewKey({ label: '', api_key: '', bucket: '1', units_limit: '10000' })
+      setNewKey({ label: '', api_key: '', units_limit: '10000' })
       setShowAddKey(false)
       await fetchApiKeys()
       showToast('API key added!')
@@ -971,29 +970,16 @@ export default function ControlPage() {
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 14 }}>
                 Add YouTube Data API Key
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
                 <div>
                   <div className="section-title" style={{ marginBottom: 5 }}>Label</div>
                   <input className="input" placeholder="e.g. Project Alpha Key 1"
                     value={newKey.label} onChange={e => setNewKey(p => ({ ...p, label: e.target.value }))} />
                 </div>
                 <div>
-                  <div className="section-title" style={{ marginBottom: 5 }}>Bucket (1 or 2)</div>
-                  <select className="input" value={newKey.bucket} onChange={e => setNewKey(p => ({ ...p, bucket: e.target.value }))}>
-                    <option value="1">Bucket 1</option>
-                    <option value="2">Bucket 2</option>
-                  </select>
-                </div>
-                <div>
                   <div className="section-title" style={{ marginBottom: 5 }}>Daily Quota Limit</div>
                   <input className="input" type="number" placeholder="10000"
                     value={newKey.units_limit} onChange={e => setNewKey(p => ({ ...p, units_limit: e.target.value }))} />
-                </div>
-                <div>
-                  <div className="section-title" style={{ marginBottom: 5 }}>Bucket Desc</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 8 }}>
-                    Bucket 1 = Primary, Bucket 2 = Fallback
-                  </div>
                 </div>
               </div>
               <div style={{ marginBottom: 14 }}>
@@ -1046,7 +1032,7 @@ export default function ControlPage() {
                 style={{
                   padding: '16px 20px',
                   opacity: k.is_active ? 1 : 0.55,
-                  borderLeft: `3px solid ${k.bucket === 1 ? 'var(--blue)' : 'var(--violet)'}`,
+                  borderLeft: '3px solid var(--blue)',
                 }}
               >
                 {/* Header */}
@@ -1055,10 +1041,7 @@ export default function ControlPage() {
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 2 }}>
                       {k.label}
                     </div>
-                    <span className={`badge ${k.bucket === 1 ? 'badge-blue' : 'badge-purple'}`}>
-                      Bucket {k.bucket}
-                    </span>
-                    {!k.is_active && <span className="badge badge-gray" style={{ marginLeft: 4 }}>Disabled</span>}
+                    {!k.is_active && <span className="badge badge-gray">Disabled</span>}
                     {k.usage_pct >= 80 && <span className="badge badge-red" style={{ marginLeft: 4 }}>⚠ High Usage</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>

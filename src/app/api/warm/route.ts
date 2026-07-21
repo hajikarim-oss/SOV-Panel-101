@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
 
-// Warm all critical serverless functions by importing and touching them
-// Called by Vercel cron every 4 minutes to prevent cold starts
+// Warm critical serverless functions + daily quota reset
+// Called by Vercel cron daily at 7 AM UTC
 export async function GET() {
   const start = Date.now()
 
@@ -17,6 +17,12 @@ export async function GET() {
   try {
     const { redis } = await import('@/lib/cache')
     if (redis) await redis.ping()
+  } catch {}
+
+  // Daily reset: zero out all active API key quotas for the new day
+  try {
+    const { resetDailyQuotas } = await import('@/lib/migrations')
+    await resetDailyQuotas()
   } catch {}
 
   return NextResponse.json({
