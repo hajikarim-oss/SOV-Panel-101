@@ -26,7 +26,7 @@ interface Keyword {
   campaign_id: string
   text: string
   language: string
-  type: 'generic' | 'branded' | 'comparison'
+  category: 'generic' | 'branded' | 'comparison'
   status: 'active' | 'paused'
   result_count: number
   last_scraped: string | null
@@ -806,8 +806,8 @@ export default function ControlPage() {
                               <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>{kw.text}</div>
                             </td>
                             <td>
-                              <span className={`badge ${kw.type === 'branded' ? 'badge-blue' : kw.type === 'comparison' ? 'badge-purple' : 'badge-gray'}`}>
-                                {kw.type}
+                              <span className={`badge ${kw.category === 'branded' ? 'badge-blue' : kw.category === 'comparison' ? 'badge-purple' : 'badge-gray'}`}>
+                                {kw.category}
                               </span>
                             </td>
                             <td>
