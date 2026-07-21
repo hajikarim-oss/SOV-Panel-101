@@ -651,7 +651,7 @@ export default function ControlPage() {
                       <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 3 }}>
                         {selectedCampaign?.name}
                       </div>
-                      <div style={{ display: 'flex', gap: 14 }}>
+                      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                           {keywords.length} keywords total
                         </span>
@@ -660,6 +660,9 @@ export default function ControlPage() {
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {keywords.filter(k => k.status === 'paused').length} paused
+                        </span>
+                        <span style={{ fontSize: 12, color: 'var(--blue)' }}>
+                          {keywords.filter(k => k.last_scraped && new Date(k.last_scraped).getTime() > Date.now() - 86400000).length} scraped (24h)
                         </span>
                       </div>
                     </div>
