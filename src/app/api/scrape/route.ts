@@ -10,19 +10,42 @@ export async function POST(req: NextRequest) {
     const { campaign_id, keyword_id, limit = 2 } = await req.json()
     if (!campaign_id) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
-    const kwFilter = keyword_id ? `AND id = $2` : ''
+    // 1. Clean up any scrape_jobs stuck in 'running' for more than 5 minutes (from timed-out requests)
+    await queryAll(
+      `UPDATE scrape_jobs SET status = 'failed', error_msg = 'Timed out — request did not complete', completed_at = $1
+       WHERE status = 'running' AND started_at < NOW() - INTERVAL '5 minutes'`,
+      [new Date().toISOString()]
+    )
+
+    // 2. Build keyword filter — skip keywords scraped in the last 24 hours
+    let kwFilter = `AND status = 'active'`
     const params: any[] = [campaign_id]
-    if (keyword_id) params.push(keyword_id)
+
+    if (keyword_id) {
+      kwFilter += ` AND id = $2`
+      params.push(keyword_id)
+    } else {
+      kwFilter += ` AND (last_scraped_at IS NULL OR last_scraped_at < NOW() - INTERVAL '24 hours')`
+    }
 
     const keywords = await queryAll<any>(
-      `SELECT * FROM keywords WHERE campaign_id = $1 AND status = 'active' ${kwFilter}`,
+      `SELECT * FROM keywords WHERE campaign_id = $1 ${kwFilter}`,
       params
     )
 
     if (!keywords || keywords.length === 0) {
-      return NextResponse.json({ error: 'No active keywords found' }, { status: 400 })
+      return NextResponse.json({
+        ok: true,
+        message: keyword_id
+          ? 'Keyword not found or already scraped recently'
+          : 'All active keywords were scraped within the last 24 hours. Nothing to do.',
+        results: [],
+        remaining: 0,
+        total: 0,
+      })
     }
 
+    // 3. Check for available API keys
     const keys = await queryAll<any>(
       `SELECT id FROM api_keys WHERE is_active = TRUE AND (units_used + 100) <= units_limit`
     )
@@ -31,6 +54,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'NO_API_KEYS: All API keys are exhausted for today' }, { status: 503 })
     }
 
+    // 4. Process batch in parallel
     const batch = keywords.slice(0, Math.min(limit, keywords.length))
     const remaining = keywords.length - batch.length
 
