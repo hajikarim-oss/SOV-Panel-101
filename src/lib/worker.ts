@@ -1,5 +1,5 @@
 import { Job } from 'bullmq'
-import { createWorker, QUEUE_NAMES, ScrapeJobData, DailyViewsJobData, WeeklyRefreshJobData, BrandAnalysisJobData, SheetsSyncJobData } from './queue'
+import { createWorker, QUEUE_NAMES, ScrapeJobData, DailyViewsJobData, WeeklyRefreshJobData, BrandAnalysisJobData } from './queue'
 import { scrapeKeyword, runDailyViewUpdatePg, runWeeklyKeywordRefreshPg, runBrandAnalysisPg } from './scrape-pipeline-pg'
 import { refreshMaterializedViews, resetDailyQuotas, setSystemMetadata } from './migrations'
 import { queryAll } from './supabase'
@@ -122,30 +122,6 @@ export function startBrandAnalysisWorker() {
   return worker
 }
 
-export function startSheetsSyncWorker() {
-  const worker = createWorker<SheetsSyncJobData>(
-    QUEUE_NAMES.SHEETS_SYNC,
-    async (job: Job<SheetsSyncJobData>) => {
-      await job.updateProgress(0)
-
-      try {
-        const { syncAllDataToSheets } = await import('./google-sheets')
-        const result = await syncAllDataToSheets()
-
-        await job.updateProgress(100)
-
-        return result
-      } catch (err: any) {
-        console.error('Sheets sync failed:', err)
-        throw err
-      }
-    },
-    { concurrency: 1 }
-  )
-
-  return worker
-}
-
 export function startAllWorkers() {
   console.log('Starting background workers...')
 
@@ -153,7 +129,6 @@ export function startAllWorkers() {
   const dailyViewsWorker = startDailyViewsWorker()
   const weeklyRefreshWorker = startWeeklyRefreshWorker()
   const brandAnalysisWorker = startBrandAnalysisWorker()
-  const sheetsSyncWorker = startSheetsSyncWorker()
 
   console.log('All workers started')
 
@@ -162,7 +137,6 @@ export function startAllWorkers() {
     dailyViewsWorker,
     weeklyRefreshWorker,
     brandAnalysisWorker,
-    sheetsSyncWorker,
   }
 }
 
@@ -186,16 +160,5 @@ export async function initializeScheduledJobs() {
       jobId: 'weekly-refresh-recurring',
     })
     console.log('Scheduled weekly refresh job')
-  }
-
-  // Schedule daily sheets sync at 9 AM
-  const sheetsQueue = (await import('./queue')).getQueue(QUEUE_NAMES.SHEETS_SYNC)
-  const sheetsJobs = await (sheetsQueue as any).getJobIds()
-  if (sheetsJobs.length === 0) {
-    await (sheetsQueue as any).add('sheets-sync', { trigger: 'scheduled' }, {
-      repeat: { pattern: '0 9 * * *' },
-      jobId: 'sheets-sync-recurring',
-    })
-    console.log('Scheduled daily sheets sync job')
   }
 }

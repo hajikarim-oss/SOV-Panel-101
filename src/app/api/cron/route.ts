@@ -49,6 +49,17 @@ async function handleCron(req: NextRequest) {
     return NextResponse.json({ ok: true, message: 'Materialized views refreshed' })
   }
 
+  if (job === 'sheets_sync') {
+    const { syncAllDataToSheets } = await import('@/lib/google-sheets')
+    try {
+      const result = await syncAllDataToSheets()
+      return NextResponse.json({ ok: true, ...result })
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Unknown error'
+      return NextResponse.json({ error: msg }, { status: 500 })
+    }
+  }
+
   return NextResponse.json({ error: `Unknown job: ${job}` }, { status: 400 })
 }
 

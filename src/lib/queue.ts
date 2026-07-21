@@ -37,7 +37,6 @@ export const QUEUE_NAMES = {
   BRAND_ANALYSIS: 'brand-analysis',
   TRANSCRIPT_FETCH: 'transcript-fetch',
   QUOTA_MONITOR: 'quota-monitor',
-  SHEETS_SYNC: 'sheets-sync',
 } as const
 
 export type QueueName = typeof QUEUE_NAMES[keyof typeof QUEUE_NAMES]
@@ -71,10 +70,6 @@ export interface TranscriptJobData {
 
 export interface QuotaMonitorJobData {
   alertThreshold?: number
-}
-
-export interface SheetsSyncJobData {
-  trigger?: string
 }
 
 const queues = new Map<QueueName, Queue>()

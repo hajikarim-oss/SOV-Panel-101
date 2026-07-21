@@ -118,7 +118,7 @@ function UsageBar({ pct, color }: { pct: number; color: string }) {
 
 // ── Main Control Page ───────────────────────────────────────────────────────
 export default function ControlPage() {
-  const [tab, setTab] = useState<'campaigns' | 'api-keys' | 'brands' | 'users'>('campaigns')
+  const [tab, setTab] = useState<'campaigns' | 'api-keys' | 'brands' | 'users' | 'backup'>('campaigns')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([])
   const [apiKeyStats, setApiKeyStats] = useState<ApiKeyStats | null>(null)
@@ -495,6 +495,9 @@ export default function ControlPage() {
         </button>
         <button className={`toggle-btn ${tab === 'users' ? 'active' : ''}`} onClick={() => setTab('users')}>
           <Globe size={13} /> Client Logins
+        </button>
+        <button className={`toggle-btn ${tab === 'backup' ? 'active' : ''}`} onClick={() => setTab('backup')}>
+          <BookOpen size={13} /> Backup
         </button>
       </div>
 
@@ -1368,6 +1371,13 @@ export default function ControlPage() {
         </div>
       )}
 
+      {/* ══════════════════════════════════════════════════════════════════
+          TAB: BACKUP
+      ══════════════════════════════════════════════════════════════════ */}
+      {tab === 'backup' && (
+        <BackupTab toast={toast} setToast={setToast} />
+      )}
+
       {/* ── Toast ── */}
       {toast && (
         <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />
@@ -1377,6 +1387,91 @@ export default function ControlPage() {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
+    </div>
+  )
+}
+
+// ── Backup Tab Component ───────────────────────────────────────────────────
+function BackupTab({ toast, setToast }: { toast: any; setToast: (t: any) => void }) {
+  const [syncing, setSyncing] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sync')
+      const data = await res.json()
+      setSyncStatus(data)
+    } catch { /* ignore */ } finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { fetchStatus() }, [fetchStatus])
+
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/sync', { method: 'POST' })
+      const data = await res.json()
+      if (res.ok) {
+        setToast({ msg: `Synced ${data.rowsWritten} rows across ${data.sheetsUpdated.length} sheets`, type: 'success' })
+        fetchStatus()
+      } else {
+        setToast({ msg: data.error || 'Sync failed', type: 'error' })
+      }
+    } catch {
+      setToast({ msg: 'Sync failed — network error', type: 'error' })
+    } finally { setSyncing(false) }
+  }
+
+  if (loading) return (
+    <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 200, color: 'var(--text-muted)' }}>
+      <Loader2 size={18} style={{ animation: 'spin 1s linear infinite', marginRight: 8 }} /> Loading…
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 600 }}>
+      <div className="card" style={{ padding: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>Google Sheets Backup</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Export all database tables to Google Sheets</div>
+          </div>
+          <button className="btn btn-primary" onClick={handleSync} disabled={syncing} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {syncing ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={13} />}
+            {syncing ? 'Syncing…' : 'Sync Now'}
+          </button>
+        </div>
+
+        {syncStatus && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ padding: '8px 14px', borderRadius: 8, background: syncStatus.configured ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', border: `1px solid ${syncStatus.configured ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`, fontSize: 12, fontWeight: 600 }}>
+                <span style={{ color: syncStatus.configured ? '#16A34A' : '#DC2626' }}>{syncStatus.configured ? '● Configured' : '● Not Configured'}</span>
+              </div>
+              <div style={{ padding: '8px 14px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-1)', fontSize: 12, color: 'var(--text-muted)' }}>
+                Last sync: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{syncStatus.lastSyncAt ? fmtRelative(syncStatus.lastSyncAt) : 'Never'}</span>
+              </div>
+            </div>
+            {syncStatus.lastSync && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border-1)' }}>
+                Last sync: {syncStatus.lastSync.total_rows} rows across {syncStatus.lastSync.sheets}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-primary)' }}>Sheets Included</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 6 }}>
+          {['Campaigns', 'Keywords', 'Videos', 'Brand Tags', 'SOV Daily', 'Rankings', 'Brand Analysis', 'Quota Usage'].map(name => (
+            <div key={name} style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-1)', fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', textAlign: 'center' }}>
+              {name}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
