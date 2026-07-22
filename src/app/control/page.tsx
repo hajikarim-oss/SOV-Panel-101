@@ -662,7 +662,7 @@ export default function ControlPage() {
                           {keywords.filter(k => k.status === 'paused').length} paused
                         </span>
                         <span style={{ fontSize: 12, color: 'var(--blue)' }}>
-                          {keywords.filter(k => k.last_scraped && new Date(k.last_scraped).getTime() > Date.now() - 86400000).length} scraped (24h)
+                          {keywords.filter(k => k.last_scraped && new Date(k.last_scraped).getTime() > Date.now() - 43200000).length} scraped (12h)
                         </span>
                       </div>
                     </div>

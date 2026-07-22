@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -7,6 +8,9 @@ export async function PATCH(req: NextRequest) {
     if (!youtube_id || !campaign_id || !Array.isArray(tags)) {
       return NextResponse.json({ error: 'youtube_id, campaign_id, and tags array required' }, { status: 400 })
     }
+
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, campaign_id)
+    if (!authorized) return authError!
 
     const { data: video } = await supabase.from('videos').select('id').eq('youtube_id', youtube_id).single()
     if (!video) return NextResponse.json({ error: 'Video not found' }, { status: 404 })

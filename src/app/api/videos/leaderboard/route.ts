@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return error
     const sort = req.nextUrl.searchParams.get('sort') ?? 'views'
     const tab = req.nextUrl.searchParams.get('tab') ?? 'long'
     const page = parseInt(req.nextUrl.searchParams.get('page') ?? '1')

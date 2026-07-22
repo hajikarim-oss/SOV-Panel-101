@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, queryAll } from '@/lib/supabase'
 import { getCached, CACHE_TTL } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -9,6 +10,9 @@ export async function GET(req: NextRequest) {
   try {
     const cid = req.nextUrl.searchParams.get('campaign_id')
     const month = req.nextUrl.searchParams.get('month') // YYYY-MM format
+
+    const { authorized, error } = await authorizeCampaignAccess(req, cid)
+    if (!authorized) return error
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     const data = await getCached(

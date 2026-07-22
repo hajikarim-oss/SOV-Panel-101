@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -8,10 +9,13 @@ export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const isOurs = req.nextUrl.searchParams.get('is_ours')
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return error
     if (!campaignId) return NextResponse.json({ data: [], has_scrape_data: false })
 
     const key = `${cacheKey.brands(campaignId)}:${isOurs || 'all'}`
-    const data = await getCached(key, () => fetchBrands(campaignId!, isOurs), CACHE_TTL.brands_overview)
+    const data = await getCached(key, () => fetchBrands(campaignId, isOurs), CACHE_TTL.brands_overview)
     return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -106,6 +110,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { campaign_id, name, type } = body
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaign_id)
+    if (!authorized) return error
     if (!campaign_id || !name) return NextResponse.json({ error: 'campaign_id and name required' }, { status: 400 })
 
     await supabase
@@ -126,6 +133,9 @@ export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json()
     const { id, campaign_id } = body
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaign_id)
+    if (!authorized) return error
     if (!id || !campaign_id) return NextResponse.json({ error: 'id and campaign required' }, { status: 400 })
 
     await supabase.from('campaign_brands').delete().eq('id', id).eq('campaign_id', campaign_id)

@@ -35,7 +35,10 @@ function inlineParams(sql: string, params: any[]): string {
   params.forEach((val, i) => {
     const placeholder = `$${i + 1}`
     if (Array.isArray(val)) {
-      // For arrays, use ARRAY[] syntax
+      if (val.length === 0) {
+        result = result.replace(new RegExp(`\\$${i + 1}\\b`, 'g'), `'{}'`)
+        return
+      }
       const arrItems = val.map(v => {
         if (v === null || v === undefined) return 'NULL'
         if (typeof v === 'number') return String(v)

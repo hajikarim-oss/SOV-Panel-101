@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, queryAll } from '@/lib/supabase'
 import { getCached, CACHE_TTL } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60  // CRITICAL: prevents Vercel's 10s default timeout
@@ -15,7 +16,9 @@ export async function GET(req: NextRequest) {
   try {
     const cid    = req.nextUrl.searchParams.get('campaign_id')
     const isOurs = req.nextUrl.searchParams.get('is_ours')
-    if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
+
+    const { authorized, error } = await authorizeCampaignAccess(req, cid)
+    if (!authorized) return error
 
     const data = await getCached(
       `dashboard:v8:${cid}:${isOurs || 'all'}`,

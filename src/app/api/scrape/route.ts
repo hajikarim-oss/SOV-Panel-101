@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryAll } from '@/lib/supabase'
 import { scrapeKeyword } from '@/lib/scrape-pipeline-pg'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -8,6 +9,9 @@ export const maxDuration = 60
 export async function POST(req: NextRequest) {
   try {
     const { campaign_id, keyword_id, limit = 2 } = await req.json()
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaign_id)
+    if (!authorized) return error
     if (!campaign_id) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     // 1. Clean up any scrape_jobs stuck in 'running' for more than 5 minutes (from timed-out requests)
@@ -17,7 +21,7 @@ export async function POST(req: NextRequest) {
       [new Date().toISOString()]
     )
 
-    // 2. Build keyword filter — skip keywords scraped in the last 24 hours
+    // 2. Build keyword filter — skip keywords scraped in the last 12 hours
     let kwFilter = `AND status = 'active'`
     const params: any[] = [campaign_id]
 
@@ -25,7 +29,7 @@ export async function POST(req: NextRequest) {
       kwFilter += ` AND id = $2`
       params.push(keyword_id)
     } else {
-      kwFilter += ` AND (last_scraped_at IS NULL OR last_scraped_at < NOW() - INTERVAL '24 hours')`
+      kwFilter += ` AND (last_scraped_at IS NULL OR last_scraped_at < NOW() - INTERVAL '12 hours')`
     }
 
     const keywords = await queryAll<any>(
@@ -38,7 +42,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         message: keyword_id
           ? 'Keyword not found or already scraped recently'
-          : 'All active keywords were scraped within the last 24 hours. Nothing to do.',
+          : 'All active keywords were scraped within the last 12 hours. Nothing to do.',
         results: [],
         remaining: 0,
         total: 0,

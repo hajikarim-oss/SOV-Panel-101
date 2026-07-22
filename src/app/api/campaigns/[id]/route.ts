@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryAll, queryOne } from '@/lib/supabase'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 // GET /api/campaigns/[id]
-export async function GET(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, id)
+    if (!authorized) return authError!
 
     const campaign = await queryOne(`SELECT * FROM campaigns WHERE id = $1`, [id])
     if (!campaign) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -30,6 +33,9 @@ export async function GET(_: NextRequest, { params }: { params: Promise<{ id: st
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, id)
+    if (!authorized) return authError!
+
     const body = await req.json()
     await queryOne(
       `UPDATE campaigns SET name=$1, category=$2, sub_category=$3, description=$4, status=$5 WHERE id=$6`,
@@ -42,9 +48,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 // DELETE /api/campaigns/[id]
-export async function DELETE(_: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, id)
+    if (!authorized) return authError!
+
     await queryOne(`DELETE FROM campaigns WHERE id = $1`, [id])
     return NextResponse.json({ ok: true })
   } catch (e: any) {

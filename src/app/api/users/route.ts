@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email, password, and role are required' }, { status: 400 })
     }
 
-    const hashed = hashPassword(password)
+    const hashed = await hashPassword(password)
     await queryOne(`
       INSERT INTO users (email, password_hash, role, campaign_id, brand_name)
       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (email) DO NOTHING

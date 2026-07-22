@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase, queryAll } from '@/lib/supabase'
 import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+import { getSession } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const session = await getSession(req)
+  if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   try {
     const data = await getCached(cacheKey.campaigns(), fetchCampaigns, CACHE_TTL.campaigns)
     return NextResponse.json(data)
@@ -48,6 +51,10 @@ async function fetchCampaigns() {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = await getSession(req)
+    if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    if (session.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
     const { name, category, sub_category, description } = await req.json()
     if (!name?.trim()) return NextResponse.json({ error: 'Campaign name is required' }, { status: 400 })
 

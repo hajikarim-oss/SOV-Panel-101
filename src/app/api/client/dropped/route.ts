@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryAll } from '@/lib/supabase'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const brandName = req.nextUrl.searchParams.get('brand_name')
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return authError!
     if (!campaignId || !brandName) {
       return NextResponse.json({ error: 'campaign_id and brand_name are required' }, { status: 400 })
     }

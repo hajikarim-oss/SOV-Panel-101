@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
+
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return authError
+    if (!campaignId) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     let q = supabase.from('keywords').select('*').order('created_at', { ascending: false })
     if (campaignId) q = q.eq('campaign_id', campaignId)
@@ -45,6 +50,9 @@ export async function POST(req: NextRequest) {
       : [{ text: body.text, language: body.language, type: body.type }]
 
     const campaignId = body.campaign_id
+
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return authError
     if (!campaignId) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
 
     let added = 0

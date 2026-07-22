@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   const campaignId = req.nextUrl.searchParams.get('campaign_id')
+
+  const { authorized, error } = await authorizeCampaignAccess(req, campaignId)
+  if (!authorized) return error
   if (!campaignId) return NextResponse.json({ data: [] })
 
   try {

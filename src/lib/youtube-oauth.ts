@@ -209,10 +209,13 @@ export interface YouTubeVideoResult {
   }>
 }
 
+export type SearchOrder = 'relevance' | 'viewCount' | 'date' | 'rating'
+
 export async function searchYouTubeOAuth(
   keyword: string,
   maxResults: number = 50,
-  regionCode: string = 'IN'
+  regionCode: string = 'IN',
+  order: SearchOrder = 'relevance'
 ): Promise<YouTubeSearchResult> {
   return youtubeApiFetch<YouTubeSearchResult>('search', {
     part: 'id,snippet',
@@ -220,6 +223,7 @@ export async function searchYouTubeOAuth(
     type: 'video',
     maxResults: String(Math.min(maxResults, 50)),
     regionCode,
+    order,
   }, { quotaCost: 100, keyId: 'oauth' })
 }
 

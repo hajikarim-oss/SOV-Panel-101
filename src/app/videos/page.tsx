@@ -61,6 +61,7 @@ export default function VideosPage() {
   const data = videosQuery.data?.data ?? []
   const total = videosQuery.data?.total ?? 0
   const loading = videosQuery.isLoading
+  const isPageLoading = videosQuery.isFetching && !videosQuery.isLoading
 
   useEffect(() => { fetchCampaigns() }, [fetchCampaigns])
   useEffect(() => { setPage(1) }, [sort, search])
@@ -69,7 +70,7 @@ export default function VideosPage() {
 
   return (
     <div className="anim-fade-up">
-      <style>{`@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <style>{`@keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } } @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       <div className="page-header">
         <div>
@@ -114,7 +115,19 @@ export default function VideosPage() {
         </div>
       ) : (
         <>
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="card" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+            {isPageLoading && (
+              <div style={{
+                position: 'absolute', inset: 0, zIndex: 50,
+                background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(2px)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 8, background: '#0F172A', color: '#FFF', fontSize: 12, fontWeight: 600 }}>
+                  <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  Loading page…
+                </div>
+              </div>
+            )}
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table">
                 <thead>

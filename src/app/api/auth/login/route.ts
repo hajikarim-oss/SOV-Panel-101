@@ -1,25 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { queryAll } from '@/lib/supabase'
-import { signToken } from '@/lib/auth'
-import crypto from 'crypto'
-
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex')
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex')
-  return `${salt}:${hash}`
-}
-
-function verifyPassword(password: string, stored: string): boolean {
-  if (!stored || !stored.includes(':')) return false
-  const [salt, hash] = stored.split(':')
-  if (!salt || !hash) return false
-  const verifyHash = crypto.scryptSync(password, salt, 64).toString('hex')
-  try {
-    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(verifyHash, 'hex'))
-  } catch {
-    return false
-  }
-}
+import { signToken, hashPassword, verifyPassword } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,7 +14,7 @@ export async function POST(req: NextRequest) {
 
     // Auto-register: if no user with this email exists, create one
     if (!user) {
-      const hashed = hashPassword(password)
+      const hashed = await hashPassword(password)
       const inserted = await queryAll<any>(
         `INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'admin') RETURNING *`,
         [email, hashed]
@@ -46,14 +27,16 @@ export async function POST(req: NextRequest) {
     }
 
     // If user exists but password doesn't match, try to update it
-    if (user.password_hash && !verifyPassword(password, user.password_hash)) {
-      // Re-hash with the attempted password and update
-      const newHash = hashPassword(password)
-      await queryAll(
-        `UPDATE users SET password_hash = $1 WHERE id = $2`,
-        [newHash, user.id]
-      )
-      user.password_hash = newHash
+    if (user.password_hash) {
+      const valid = await verifyPassword(password, user.password_hash)
+      if (!valid) {
+        const newHash = await hashPassword(password)
+        await queryAll(
+          `UPDATE users SET password_hash = $1 WHERE id = $2`,
+          [newHash, user.id]
+        )
+        user.password_hash = newHash
+      }
     }
 
     const token = await signToken({

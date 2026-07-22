@@ -4,7 +4,9 @@ import {
   getVideoDetailsOAuth,
   getViewCountsOAuth,
   getChannelDetailsOAuth,
+  type SearchOrder,
 } from './youtube-oauth'
+import { decryptApiKey } from './crypto'
 import { fetchTranscript } from './transcript'
 import { analyzeBrandsFromTranscript } from './brand-analyzer'
 import { getQueue, QUEUE_NAMES, addJob, ScrapeJobData, DailyViewsJobData } from './queue'
@@ -70,6 +72,99 @@ function getWeekStart(): string {
   return d.toISOString().split('T')[0]
 }
 
+async function getKeyFromSupabase(minUnits: number = 100): Promise<{ api_key: string; key_id: string } | null> {
+  const rows = await queryAll<{ id: string; api_key: string; units_used: number }>(
+    `UPDATE api_keys SET units_used = units_used + $1, last_used_at = NOW()
+     WHERE id = (
+       SELECT id FROM api_keys
+       WHERE is_active = TRUE AND (units_used + $2) <= units_limit
+       ORDER BY units_used ASC LIMIT 1
+     )
+     RETURNING id, api_key, units_used`,
+    [minUnits, minUnits]
+  )
+  if (!rows || rows.length === 0) return null
+  const row = rows[0]
+  let key: string
+  try { key = decryptApiKey(row.api_key) } catch { key = row.api_key }
+  return { api_key: key, key_id: row.id }
+}
+
+async function searchYouTubeViaApiKey(
+  keyword: string, maxResults: number = 50, regionCode: string = 'IN', order: SearchOrder = 'relevance'
+): Promise<{ hits: SearchHit[]; quota_cost: number }> {
+  const keyInfo = await getKeyFromSupabase(100)
+  if (!keyInfo) throw new Error('NO_API_KEYS')
+
+  const url = new URL('https://www.googleapis.com/youtube/v3/search')
+  url.searchParams.set('part', 'id,snippet')
+  url.searchParams.set('q', keyword)
+  url.searchParams.set('type', 'video')
+  url.searchParams.set('maxResults', String(Math.min(maxResults, 50)))
+  url.searchParams.set('regionCode', regionCode)
+  url.searchParams.set('order', order)
+  url.searchParams.set('key', keyInfo.api_key)
+
+  const res = await fetch(url.toString())
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any
+    if (res.status === 403 || res.status === 429) {
+      await queryAll(`UPDATE api_keys SET units_used = units_limit WHERE id = $1`, [keyInfo.key_id])
+    }
+    throw new Error(`YouTube API error (${res.status}): ${err?.error?.message || res.statusText}`)
+  }
+
+  const data = await res.json() as any
+  const hits: SearchHit[] = (data.items || [])
+    .map((item: any, index: number) => ({
+      position: index + 1,
+      youtube_id: item.id?.videoId || '',
+      title: item.snippet?.title ?? '',
+      channel_name: item.snippet?.channelTitle ?? '',
+      channel_id: item.snippet?.channelId ?? '',
+      published_at: item.snippet?.publishedAt ?? '',
+      thumbnail_url: item.snippet?.thumbnails?.medium?.url ?? '',
+    }))
+    .filter((h: SearchHit) => Boolean(h.youtube_id))
+
+  return { hits, quota_cost: 100 }
+}
+
+async function fetchVideoDetailsViaApiKey(youtubeIds: string[]): Promise<{ videos: YouTubeVideo[]; quota_cost: number }> {
+  if (youtubeIds.length === 0) return { videos: [], quota_cost: 0 }
+  const keyInfo = await getKeyFromSupabase(1)
+  if (!keyInfo) throw new Error('NO_API_KEYS')
+
+  const ids = youtubeIds.slice(0, 50)
+  const url = new URL('https://www.googleapis.com/youtube/v3/videos')
+  url.searchParams.set('part', 'statistics,snippet,contentDetails')
+  url.searchParams.set('id', ids.join(','))
+  url.searchParams.set('key', keyInfo.api_key)
+
+  const res = await fetch(url.toString())
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as any
+    throw new Error(`YouTube API error (${res.status}): ${err?.error?.message || res.statusText}`)
+  }
+
+  const data = await res.json() as any
+  const videos: YouTubeVideo[] = (data.items || []).map((item: any) => ({
+    youtube_id: item.id,
+    title: item.snippet?.title || '',
+    description: item.snippet?.description || '',
+    channel_name: item.snippet?.channelTitle || '',
+    channel_id: item.snippet?.channelId || '',
+    view_count: parseInt(item.statistics?.viewCount || '0', 10),
+    published_at: item.snippet?.publishedAt || '',
+    thumbnail_url: item.snippet?.thumbnails?.medium?.url || '',
+    duration: item.contentDetails?.duration || '',
+    duration_sec: parseDurationSec(item.contentDetails?.duration),
+    tags: [],
+  }))
+
+  return { videos, quota_cost: 1 }
+}
+
 async function getCampaignPoolIds(campaignId: string): Promise<Set<string>> {
   const rows = await queryAll<{ youtube_id: string }>(
     `SELECT v.youtube_id FROM campaign_videos cv INNER JOIN videos v ON v.id = cv.video_id WHERE cv.campaign_id = $1`,
@@ -103,6 +198,84 @@ async function loadCampaignPoolVideos(campaignId: string, limit: number = 50): P
     duration_sec: r.duration_sec || 0,
     tags: Array.isArray(r.tags) ? r.tags : [],
   }))
+}
+
+const STOP_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
+  'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can',
+  'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they',
+  'price', 'vs', 'review', 'best', 'top', 'new', '2024', '2025', '2026', '2027',
+])
+
+function tokenize(text: string): string[] {
+  return text.toLowerCase().replace(/[^a-z0-9\u0B80-\u0BFF\u0900-\u097F\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !STOP_WORDS.has(w))
+}
+
+function scoreKeywordRelevance(title: string, description: string, channelName: string, keywordText: string): number {
+  const kwTokens = tokenize(keywordText)
+  if (kwTokens.length === 0) return 0
+
+  const titleTokens = tokenize(title)
+  const descTokens = tokenize(description).slice(0, 100)
+  const channelTokens = tokenize(channelName)
+
+  let score = 0
+  const titleSet = new Set(titleTokens)
+  const channelSet = new Set(channelTokens)
+
+  for (const kw of kwTokens) {
+    if (titleSet.has(kw)) score += 3
+    if (channelSet.has(kw)) score += 1
+    for (const dt of descTokens) {
+      if (dt === kw) { score += 1; break }
+    }
+    for (const tt of titleTokens) {
+      if (tt.includes(kw) || kw.includes(tt)) { score += 2; break }
+    }
+  }
+
+  return score
+}
+
+async function loadKeywordRelevantPoolVideos(campaignId: string, keywordText: string, limit: number = 50): Promise<YouTubeVideo[]> {
+  const rows = await queryAll<any>(
+    `SELECT v.youtube_id, v.title, v.description, v.channel_name, v.channel_id,
+            v.view_count, v.published_at, v.thumbnail_url, v.duration, v.duration_sec, v.tags
+     FROM campaign_videos cv
+     INNER JOIN videos v ON v.id = cv.video_id
+     WHERE cv.campaign_id = $1
+     ORDER BY v.view_count DESC
+     LIMIT 500`,
+    [campaignId]
+  )
+
+  const scored = rows.map(r => ({
+    video: {
+      youtube_id: r.youtube_id || '',
+      title: r.title || '',
+      description: r.description || '',
+      channel_name: r.channel_name || '',
+      channel_id: r.channel_id || '',
+      view_count: r.view_count || 0,
+      published_at: r.published_at || '',
+      thumbnail_url: r.thumbnail_url || '',
+      duration: r.duration || '',
+      duration_sec: r.duration_sec || 0,
+      tags: Array.isArray(r.tags) ? r.tags : [],
+    } as YouTubeVideo,
+    score: scoreKeywordRelevance(r.title || '', r.description || '', r.channel_name || '', keywordText),
+  }))
+
+  scored.sort((a, b) => b.score - a.score || b.video.view_count - a.video.view_count)
+
+  const minScore = scored.length > 0 ? scored[0].score : 0
+  if (minScore > 0) {
+    return scored.filter(s => s.score >= Math.max(1, minScore * 0.3)).slice(0, limit).map(s => s.video)
+  }
+  return scored.slice(0, limit).map(s => s.video)
 }
 
 async function loadVideosFromDb(youtubeIds: string[]): Promise<Map<string, YouTubeVideo>> {
@@ -179,21 +352,40 @@ export async function scrapeKeyword(
   let quotaCost = 0
 
   try {
-    const searchRes = await searchYouTubeOAuth(keywordText, 50)
-    hits = (searchRes.items || []).map((item, index) => ({
-      position: index + 1,
-      youtube_id: item.id.videoId,
-      title: item.snippet?.title ?? '',
-      channel_name: item.snippet?.channelTitle ?? '',
-      channel_id: item.snippet?.channelId ?? '',
-      published_at: item.snippet?.publishedAt ?? '',
-      thumbnail_url: item.snippet?.thumbnails?.medium?.url ?? '',
-    })).filter(h => Boolean(h.youtube_id))
-    quotaCost = 100
+    const orders: SearchOrder[] = ['relevance', 'viewCount', 'date']
+    const seenIds = new Set<string>()
+    const allHits: SearchHit[] = []
+
+    for (const order of orders) {
+      try {
+        const searchRes = await searchYouTubeOAuth(keywordText, 20, 'IN', order)
+        for (const item of (searchRes.items || [])) {
+          const vid = item.id.videoId
+          if (vid && !seenIds.has(vid)) {
+            seenIds.add(vid)
+            allHits.push({
+              position: allHits.length + 1,
+              youtube_id: vid,
+              title: item.snippet?.title ?? '',
+              channel_name: item.snippet?.channelTitle ?? '',
+              channel_id: item.snippet?.channelId ?? '',
+              published_at: item.snippet?.publishedAt ?? '',
+              thumbnail_url: item.snippet?.thumbnails?.medium?.url ?? '',
+            })
+          }
+        }
+        quotaCost += 100
+      } catch (searchErr: any) {
+        const msg = String(searchErr?.message ?? '')
+        if (msg.includes('quota') || msg.includes('429') || msg.includes('403')) break
+      }
+    }
+
+    hits = allHits
   } catch (err: any) {
     const msg = String(err?.message ?? '')
     if (msg.includes('quota') || msg.includes('429') || msg.includes('403')) {
-      const poolVideos = await loadCampaignPoolVideos(campaignId, 50)
+      const poolVideos = await loadKeywordRelevantPoolVideos(campaignId, keywordText, 50)
       if (poolVideos.length > 0) {
         hits = poolVideos.map((v, i) => ({
           position: i + 1,
@@ -211,6 +403,54 @@ export async function scrapeKeyword(
     } else {
       throw err
     }
+  }
+
+  // If OAuth search yielded no results, fall back to API key search (Supabase-based)
+  if (hits.length === 0) {
+    try {
+      const orders: SearchOrder[] = ['relevance', 'viewCount', 'date']
+      const seenIds = new Set<string>()
+
+      for (const order of orders) {
+        try {
+          const { hits: kwHits, quota_cost: kwCost } = await searchYouTubeViaApiKey(keywordText, 20, 'IN', order)
+          for (const h of kwHits) {
+            if (!seenIds.has(h.youtube_id)) {
+              seenIds.add(h.youtube_id)
+              hits.push({ ...h, position: hits.length + 1 })
+            }
+          }
+          quotaCost += kwCost
+        } catch {
+          break
+        }
+      }
+    } catch {
+      const poolVideos = await loadKeywordRelevantPoolVideos(campaignId, keywordText, 50)
+      hits = poolVideos.map((v, i) => ({
+        position: i + 1,
+        youtube_id: v.youtube_id,
+        title: v.title,
+        channel_name: v.channel_name,
+        channel_id: v.channel_id,
+        published_at: v.published_at,
+        thumbnail_url: v.thumbnail_url,
+      }))
+    }
+  }
+
+  // Final fallback: if still no hits, use pool videos
+  if (hits.length === 0) {
+    const poolVideos = await loadKeywordRelevantPoolVideos(campaignId, keywordText, 50)
+    hits = poolVideos.map((v, i) => ({
+      position: i + 1,
+      youtube_id: v.youtube_id,
+      title: v.title,
+      channel_name: v.channel_name,
+      channel_id: v.channel_id,
+      published_at: v.published_at,
+      thumbnail_url: v.thumbnail_url,
+    }))
   }
 
   const brandNames = await queryAll<{ name: string }>(
@@ -265,7 +505,14 @@ export async function scrapeKeyword(
       }))
       quotaCost += 1
     } catch (err) {
-      console.error('Failed to fetch video details:', err)
+      console.error('OAuth video details failed, trying API key fallback:', err)
+      try {
+        const { videos: kwVideos, quota_cost: detailCost } = await fetchVideoDetailsViaApiKey(unknownIds.slice(0, 50))
+        fetchedVideos = kwVideos
+        quotaCost += detailCost
+      } catch (err2) {
+        console.error('API key video details also failed:', err2)
+      }
     }
   }
 

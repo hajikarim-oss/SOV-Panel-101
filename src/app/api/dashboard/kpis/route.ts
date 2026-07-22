@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getCached, CACHE_TTL, cacheKey } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -14,6 +15,8 @@ export async function GET(req: NextRequest) {
   try {
     const cid = req.nextUrl.searchParams.get('campaign_id')
     if (!cid) return NextResponse.json({ error: 'campaign_id required' }, { status: 400 })
+    const { authorized, error: authError } = await authorizeCampaignAccess(req, cid)
+    if (!authorized) return authError!
 
     const key = cacheKey.kpis(cid)
     const data = await getCached(key, () => fetchKpis(cid), CACHE_TTL.overview_kpis)

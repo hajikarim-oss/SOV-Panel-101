@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { getCached, cacheKey, CACHE_TTL } from '@/lib/cache'
+import { authorizeCampaignAccess } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -9,10 +10,13 @@ export async function GET(req: NextRequest) {
     const campaignId = req.nextUrl.searchParams.get('campaign_id')
     const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')
     const isOurs = req.nextUrl.searchParams.get('is_ours')
+
+    const { authorized, error } = await authorizeCampaignAccess(req, campaignId)
+    if (!authorized) return error
     if (!campaignId) return NextResponse.json({ data: [], brands: [], has_scrape_data: false })
 
     const key = `${cacheKey.sovTrend(campaignId, 'all', String(days))}:${isOurs || 'all'}`
-    const data = await getCached(key, () => fetchSovTrend(campaignId!, days, isOurs), CACHE_TTL.sov_trend)
+    const data = await getCached(key, () => fetchSovTrend(campaignId, days, isOurs), CACHE_TTL.sov_trend)
     return NextResponse.json(data)
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'

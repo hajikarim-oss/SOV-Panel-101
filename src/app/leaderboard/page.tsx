@@ -156,6 +156,7 @@ export default function LeaderboardPage() {
   const videos = leaderboardQuery.data?.data ?? []
   const total = leaderboardQuery.data?.total ?? 0
   const channels = leaderboardQuery.data?.channels ?? []
+  const isPageLoading = leaderboardQuery.isFetching && !leaderboardQuery.isLoading
 
   const handleToggleOwnership = async (video: VideoRow) => {
     const newVal = !video.is_ours
@@ -407,7 +408,19 @@ export default function LeaderboardPage() {
           <div style={{ fontSize: 12, color: '#64748B' }}>Add keywords and fire scrape jobs in Campaign Control to populate listings.</div>
         </div>
       ) : (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="card" style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+          {isPageLoading && (
+            <div style={{
+              position: 'absolute', inset: 0, zIndex: 50,
+              background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(2px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', borderRadius: 8, background: '#0F172A', color: '#FFF', fontSize: 12, fontWeight: 600 }}>
+                <div style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                Loading page…
+              </div>
+            </div>
+          )}
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
