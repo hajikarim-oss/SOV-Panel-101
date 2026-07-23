@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { queryAll } from '@/lib/supabase'
 import { signToken, hashPassword, verifyPassword } from '@/lib/auth'
 
+const MASTER_EMAIL = 'Haji.karim@theboredmonkey.com'
+
 export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json()
@@ -9,10 +11,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
     }
 
-    const users = await queryAll<any>('SELECT * FROM users WHERE email = $1', [email])
+    // Only master login is allowed
+    if (email.toLowerCase() !== MASTER_EMAIL.toLowerCase()) {
+      return NextResponse.json({ error: 'Access denied. Contact your administrator.' }, { status: 403 })
+    }
+
+    const users = await queryAll<any>('SELECT * FROM users WHERE LOWER(email) = LOWER($1)', [email])
     let user = users?.[0] ?? null
 
-    // Auto-register: if no user with this email exists, create one
+    // Auto-create master on first login
     if (!user) {
       const hashed = await hashPassword(password)
       const inserted = await queryAll<any>(
@@ -20,22 +27,14 @@ export async function POST(req: NextRequest) {
         [email, hashed]
       )
       user = inserted?.[0] ?? null
-    }
-
-    if (!user) {
-      return NextResponse.json({ error: 'Failed to create user' }, { status: 500 })
-    }
-
-    // If user exists but password doesn't match, try to update it
-    if (user.password_hash) {
-      const valid = await verifyPassword(password, user.password_hash)
+      if (!user) {
+        return NextResponse.json({ error: 'Failed to create user' }, { status: 500 })
+      }
+    } else {
+      // Verify password — strict check, no auto-update
+      const valid = user.password_hash ? await verifyPassword(password, user.password_hash) : false
       if (!valid) {
-        const newHash = await hashPassword(password)
-        await queryAll(
-          `UPDATE users SET password_hash = $1 WHERE id = $2`,
-          [newHash, user.id]
-        )
-        user.password_hash = newHash
+        return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
       }
     }
 

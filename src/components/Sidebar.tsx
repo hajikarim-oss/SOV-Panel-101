@@ -6,11 +6,11 @@ import { useState, useEffect } from 'react'
 import { useCampaignStore } from '@/lib/store'
 import { Play } from 'lucide-react'
 
-// ── Nav Structure ──────────────────────────────────────────────────
 const NAV = [
   {
     section: 'WORKSPACE',
     items: [
+      { href: '/workspace', label: 'Project Hub', dot: 'blue' },
       { href: '/control', label: 'Campaign Control', dot: 'blue' },
     ]
   },
@@ -26,6 +26,13 @@ const NAV = [
       { href: '/dropped',       label: 'Dropped Rankings',  dot: 'red' },
       { href: '/multi-keyword', label: 'Multi-Keyword',     dot: 'violet' },
       { href: '/analytic-calendar', label: 'Calendar',      dot: 'blue' },
+      { href: '/brands-products', label: 'Brands & Products', dot: 'orange' },
+    ]
+  },
+  {
+    section: 'SYSTEM',
+    items: [
+      { href: '/settings', label: 'Settings', dot: 'orange' },
     ]
   },
   {
@@ -45,18 +52,26 @@ const DOT_COLORS: Record<string, string> = {
   gray:   '#94A3B8',
 }
 
+function LogoSmall() {
+  return (
+    <img
+      src="/tbm-logo.png"
+      alt="The Bored Monkey"
+      style={{ width: '100%', height: 'auto', display: 'block' }}
+    />
+  )
+}
+
 export default function Sidebar() {
   const pathname = usePathname()
   const [collapsed, setCollapsed] = useState(false)
   const [quota, setQuota] = useState<{ used: number; total: number } | null>(null)
   const { campaigns, activeCampaignId, fetchCampaigns } = useCampaignStore()
 
-  // Fetch campaigns for display in sidebar
   useEffect(() => {
     fetchCampaigns()
   }, [fetchCampaigns])
 
-  // Fetch API quota for sidebar bar
   useEffect(() => {
     fetch('/api/api-keys')
       .then(r => r.json())
@@ -77,28 +92,29 @@ export default function Sidebar() {
       position: 'fixed',
       top: 0, left: 0, height: '100%',
       width: collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-w)',
-      background: '#FFFFFF',
-      borderRight: '1.5px solid rgba(0,0,0,0.06)',
+      background: 'rgba(255,255,255,0.96)',
+      borderRight: '1.5px solid rgba(26,115,232,0.05)',
       display: 'flex',
       flexDirection: 'column',
       zIndex: 50,
       transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)',
       overflow: 'hidden',
-      boxShadow: '4px 0 24px rgba(0,0,0,0.02)',
+      boxShadow: '2px 0 20px rgba(0,0,0,0.02)',
     }}>
 
       {/* ── Logo / Brand ── */}
       <div style={{
-        padding: collapsed ? '16px 12px' : '12px 14px',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        padding: collapsed ? '14px 10px' : '14px 14px 10px',
+        borderBottom: '1.5px solid rgba(26,115,232,0.05)',
         display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
         minHeight: 52,
       }}>
         {collapsed ? (
           <div style={{
             width: 30, height: 30, borderRadius: 8,
-            background: 'linear-gradient(135deg, #1A73E8 0%, #4285F4 100%)',
+            background: 'linear-gradient(135deg, #F58220 0%, #FF9F43 100%)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 2px 8px rgba(245,130,32,0.25)',
           }}>
             <svg width="14" height="14" viewBox="0 0 15 15" fill="none">
               <rect x="1" y="8" width="3" height="6" rx="1" fill="white" opacity="0.8"/>
@@ -107,11 +123,7 @@ export default function Sidebar() {
             </svg>
           </div>
         ) : (
-          <img
-            src="/tbm-logo.png"
-            alt="The Bored Monkey"
-            style={{ width: '100%', height: 'auto', display: 'block' }}
-          />
+          <LogoSmall />
         )}
       </div>
 
@@ -120,15 +132,15 @@ export default function Sidebar() {
         <div style={{
           margin: '10px 12px',
           padding: '8px 12px',
-          background: 'rgba(26,115,232,0.04)',
-          border: '1px solid rgba(26,115,232,0.12)',
+          background: 'linear-gradient(135deg, rgba(245,130,32,0.04), rgba(255,159,67,0.02))',
+          border: '1.5px solid rgba(245,130,32,0.1)',
           borderRadius: 8,
           cursor: 'default',
         }}>
           <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.7px', color: '#94A3B8', marginBottom: 2 }}>
             Active Project
           </div>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#1A73E8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#F58220', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {activeCampaign.name}
           </div>
           {activeCampaign.category && (
@@ -150,7 +162,7 @@ export default function Sidebar() {
           <div key={group.section} style={{ marginBottom: 8 }}>
             {!collapsed && (
               <div style={{
-                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.9px',
+                fontSize: 9.5, fontWeight: 700, letterSpacing: '1px',
                 color: '#94A3B8', padding: '8px 8px 4px',
                 textTransform: 'uppercase',
               }}>
@@ -195,20 +207,18 @@ export default function Sidebar() {
                     }
                   }}
                 >
-                  {/* Active left indicator */}
                   {active && !collapsed && (
                     <div style={{
                       position: 'absolute', left: 0, top: 4, bottom: 4,
                       width: 3, borderRadius: '0 3px 3px 0',
-                      background: dotColor,
+                      background: `linear-gradient(180deg, ${dotColor}, ${dotColor}88)`,
                     }} />
                   )}
 
-                  {/* Dot indicator */}
                   <div style={{
                     width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
                     background: active ? dotColor : '#CBD5E1',
-                    transition: 'background 0.12s',
+                    transition: 'all 0.12s',
                     boxShadow: active ? `0 0 6px ${dotColor}60` : 'none',
                   }} />
 
@@ -231,17 +241,18 @@ export default function Sidebar() {
       {!collapsed && (
         <div style={{
           padding: '10px 16px',
-          borderTop: '1px solid rgba(0,0,0,0.06)',
-          background: '#FAFBFC',
+          borderTop: '1.5px solid rgba(26,115,232,0.04)',
+          background: 'rgba(244,247,252,0.5)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
             <span style={{ fontSize: 10.5, color: '#64748B', fontWeight: 600 }}>API Quota Used</span>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: quotaColor }}>{quotaPct}%</span>
           </div>
-          <div style={{ height: 4, borderRadius: 99, background: '#E2E8F0' }}>
+          <div style={{ height: 4, borderRadius: 99, background: '#E2E8F0', overflow: 'hidden' }}>
             <div style={{
               width: `${quotaPct}%`, height: '100%', borderRadius: 99,
-              background: quotaColor, transition: 'width 0.5s ease',
+              background: `linear-gradient(90deg, ${quotaColor}, ${quotaColor}88)`,
+              transition: 'width 0.5s ease',
             }} />
           </div>
           {quota && (
@@ -256,14 +267,14 @@ export default function Sidebar() {
       {!collapsed && (
         <div style={{
           padding: '10px 16px',
-          borderTop: '1px solid rgba(0,0,0,0.06)',
-          background: '#FAFBFC',
+          borderTop: '1.5px solid rgba(26,115,232,0.04)',
+          background: 'rgba(244,247,252,0.5)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               Admin Panel
             </div>
             <div style={{ fontSize: 9.5, color: '#94A3B8' }}>Logged in</div>
@@ -274,9 +285,14 @@ export default function Sidebar() {
               window.location.href = '/login'
             }}
             style={{
-              background: 'none', border: 'none', color: '#EF4444',
-              fontSize: 10.5, fontWeight: 700, cursor: 'pointer', padding: 0
+              background: 'none', border: '1.5px solid rgba(239,68,68,0.1)',
+              color: '#EF4444', borderRadius: 6,
+              fontSize: 10.5, fontWeight: 700, cursor: 'pointer',
+              padding: '4px 10px', fontFamily: 'inherit',
+              transition: 'all 0.12s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.06)' }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           >
             Logout
           </button>
@@ -290,13 +306,13 @@ export default function Sidebar() {
           style={{
             margin: '0 8px 4px', padding: '7px 10px',
             borderRadius: 7, background: 'transparent',
-            border: '1px solid rgba(26,115,232,0.12)',
-            color: '#1A73E8', cursor: 'pointer',
+            border: '1.5px solid rgba(245,130,32,0.1)',
+            color: '#F58220', cursor: 'pointer',
             display: 'flex', alignItems: 'center', gap: 7,
             transition: 'all 0.12s', fontFamily: 'inherit',
             fontSize: 11.5, fontWeight: 600,
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(26,115,232,0.06)' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,130,32,0.04)' }}
           onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
         >
           <Play size={12} /> Replay Tutorial
@@ -311,7 +327,7 @@ export default function Sidebar() {
           padding: '8px',
           borderRadius: 7,
           background: 'transparent',
-          border: '1px solid rgba(0,0,0,0.07)',
+          border: '1.5px solid rgba(26,115,232,0.06)',
           color: '#94A3B8',
           cursor: 'pointer',
           display: 'flex',
@@ -332,7 +348,6 @@ export default function Sidebar() {
           ;(e.currentTarget as HTMLElement).style.color = '#94A3B8'
         }}
       >
-        {/* Inline SVG chevron — no icon library needed */}
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
           {collapsed
             ? <path d="M5 3l4 4-4 4" />

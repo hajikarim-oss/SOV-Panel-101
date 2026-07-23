@@ -6,12 +6,14 @@ import Header from '@/components/Header'
 import TutorialOverlay from '@/components/TutorialOverlay'
 
 const PUBLIC_PATHS = ['/login', '/privacy-policy']
+const STANDALONE_PATHS = ['/workspace']
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isPublic = PUBLIC_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))
+  const isStandalone = STANDALONE_PATHS.some(p => pathname === p || pathname.startsWith(`${p}/`))
 
-  if (isPublic) {
+  if (isPublic || isStandalone) {
     return <>{children}</>
   }
 

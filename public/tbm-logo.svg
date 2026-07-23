@@ -1,29 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 120" width="600" height="120">
-  <!-- Orange bracket above "BoredMon" -->
-  <path d="M145 18 L145 8 L420 8 L420 18" stroke="#F58220" stroke-width="5" fill="none" stroke-linecap="round"/>
-  <line x1="145" y1="18" x2="145" y2="30" stroke="#F58220" stroke-width="5" stroke-linecap="round"/>
-  <line x1="420" y1="18" x2="420" y2="30" stroke="#F58220" stroke-width="5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 130" width="700" height="130">
+  <defs>
+    <linearGradient id="lg-orange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F58220"/>
+      <stop offset="100%" stop-color="#FF9F43"/>
+    </linearGradient>
+    <linearGradient id="lg-dark" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A2E"/>
+      <stop offset="100%" stop-color="#2D2D44"/>
+    </linearGradient>
+  </defs>
 
-  <!-- "The" in black -->
-  <text x="20" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#1A1A1A" letter-spacing="-2">The</text>
+  <!-- Underline bar -->
+  <rect x="135" y="95" width="310" height="4" rx="2" fill="url(#lg-orange)" opacity="0.25"/>
+  <rect x="135" y="93" width="310" height="2" rx="1" fill="url(#lg-orange)"/>
+
+  <!-- Accent dots -->
+  <circle cx="130" cy="100" r="3" fill="#F58220" opacity="0.35"/>
+  <circle cx="450" cy="100" r="3" fill="#F58220" opacity="0.35"/>
+
+  <!-- "The" -->
+  <text x="20" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-dark)" letter-spacing="-1.5">The</text>
 
   <!-- "B" in orange -->
-  <text x="132" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#F58220" letter-spacing="-2">B</text>
+  <text x="125" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-orange)" letter-spacing="-1">B</text>
 
-  <!-- "ored" in black -->
-  <text x="183" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#1A1A1A" letter-spacing="-2">ored</text>
+  <!-- "ored" -->
+  <text x="172" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-dark)" letter-spacing="-1">ored</text>
 
-  <!-- "M" in black -->
-  <text x="336" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#1A1A1A" letter-spacing="-2">M</text>
+  <!-- "M" -->
+  <text x="326" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-dark)" letter-spacing="-1">M</text>
 
-  <!-- "o" in orange with leaf -->
-  <text x="407" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#F58220" letter-spacing="-2">o</text>
-  <!-- leaf on top of orange o -->
-  <path d="M443 26 Q448 14 456 18 Q450 22 448 30" fill="#F58220"/>
+  <!-- "o" in orange -->
+  <ellipse cx="405" cy="42" rx="16" ry="14" fill="#F58220" opacity="0.08"/>
+  <text x="396" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-orange)" letter-spacing="-1">o</text>
 
-  <!-- "nkey" in black -->
-  <text x="449" y="78" font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="68" fill="#1A1A1A" letter-spacing="-2">nkey</text>
+  <!-- "nkey" -->
+  <text x="434" y="78" font-family="'Plus Jakarta Sans','Arial Black',sans-serif" font-weight="800" font-size="64" fill="url(#lg-dark)" letter-spacing="-1">nkey</text>
 
-  <!-- "INSPIRED & CONVERSION" subtitle -->
-  <text x="300" y="110" font-family="'Arial', 'Helvetica Neue', sans-serif" font-weight="600" font-size="18" fill="#F58220" text-anchor="middle" letter-spacing="6">INSPIRED &amp; CONVERSION</text>
+  <!-- Tagline -->
+  <text x="305" y="120" font-family="'Plus Jakarta Sans',sans-serif" font-weight="700" font-size="16" fill="#F58220" text-anchor="middle" letter-spacing="8" opacity="0.7">INSPIRED &amp; CONVERSION</text>
 </svg>

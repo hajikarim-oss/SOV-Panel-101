@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 60" width="260" height="60">
+  <text x="5" y="48" font-family="Arial Black,Arial,Helvetica,sans-serif" font-weight="900" font-size="48" fill="#1A1A2E" letter-spacing="-1">GoPlanet</text>
+  <circle cx="240" cy="28" r="12" fill="none" stroke="#00C853" stroke-width="2.5" opacity="0.6"/>
+  <circle cx="240" cy="28" r="6" fill="#00C853" opacity="0.4"/>
+</svg>

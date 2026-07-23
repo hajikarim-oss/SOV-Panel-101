@@ -203,7 +203,7 @@ export default function Header() {
       ══════════════════════════════════════════════════════════════════ */}
       {showKwModal && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.3)', backdropFilter: 'blur(4px)',
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
           animation: 'fadeIn 0.2s ease',
         }}>
@@ -314,7 +314,7 @@ export default function Header() {
       ══════════════════════════════════════════════════════════════════ */}
       {showProjModal && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.3)', backdropFilter: 'blur(4px)',
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000,
           animation: 'fadeIn 0.2s ease',
         }}>

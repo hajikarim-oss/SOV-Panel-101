@@ -953,6 +953,29 @@ export type Database = {
           added_at?: string
         }
       }
+      project_members: {
+        Row: {
+          campaign_id: string
+          user_id: string
+          role: 'owner' | 'admin' | 'editor' | 'viewer'
+          invited_by: string | null
+          created_at: string
+        }
+        Insert: {
+          campaign_id: string
+          user_id: string
+          role: 'owner' | 'admin' | 'editor' | 'viewer'
+          invited_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          campaign_id?: string
+          user_id?: string
+          role?: 'owner' | 'admin' | 'editor' | 'viewer'
+          invited_by?: string | null
+          created_at?: string
+        }
+      }
     }
   }
 }

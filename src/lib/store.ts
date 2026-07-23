@@ -14,12 +14,21 @@ export interface Campaign {
   created_at: string
 }
 
+export interface ProjectWithRole extends Campaign {
+  role: 'owner' | 'admin' | 'editor' | 'viewer'
+}
+
 interface CampaignStore {
   campaigns: Campaign[]
   activeCampaignId: string
   _campaignsFetched: boolean
   setActiveCampaignId: (id: string) => void
   fetchCampaigns: () => Promise<void>
+
+  // Workspace / Access Control
+  userProjects: ProjectWithRole[]
+  _projectsFetched: boolean
+  fetchUserProjects: () => Promise<void>
 }
 
 export const useCampaignStore = create<CampaignStore>()(
@@ -53,6 +62,26 @@ export const useCampaignStore = create<CampaignStore>()(
           })
         } catch (e) {
           console.error('Failed to fetch campaigns in store', e)
+        }
+      },
+
+      // Workspace
+      userProjects: [],
+      _projectsFetched: false,
+
+      fetchUserProjects: async () => {
+        try {
+          const r = await fetch('/api/workspace')
+          if (!r.ok) return
+          const contentType = r.headers.get('content-type') ?? ''
+          if (!contentType.includes('application/json')) return
+          const d = await r.json()
+          set({
+            userProjects: d.projects ?? [],
+            _projectsFetched: true,
+          })
+        } catch (e) {
+          console.error('Failed to fetch user projects', e)
         }
       },
     }),

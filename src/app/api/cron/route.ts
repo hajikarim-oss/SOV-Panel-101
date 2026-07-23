@@ -63,22 +63,27 @@ async function handleCron(req: NextRequest) {
   return NextResponse.json({ error: `Unknown job: ${job}` }, { status: 400 })
 }
 
+interface CvRow {
+  video_id: string
+  campaign_id: string
+  videos: {
+    id: string
+    youtube_id: string | null
+    is_deleted: boolean
+  } | null
+}
+
 async function runDailyViewsAll(req: NextRequest) {
   const campaignId = req.nextUrl.searchParams.get('campaign_id') ?? undefined
   const startTime = Date.now()
   const today = new Date().toISOString().split('T')[0]
 
-  // Clear any stale state from previous crashed runs
-  const listKey = 'daily_views_video_list'
-  const progressKey = 'daily_views_progress'
-  await supabase.from('system_metadata').delete().eq('key', listKey)
-  await supabase.from('system_metadata').delete().eq('key', progressKey)
   await setSystemMetadata('daily_views_start', new Date().toISOString())
 
-  // Build the full unique video list
+  // Use LEFT JOIN so orphaned campaign_videos rows don't drop videos from the list
   let cvQuery = supabase
     .from('campaign_videos')
-    .select('video_id, campaign_id, videos!inner(id, youtube_id, is_deleted)')
+    .select('video_id, campaign_id, videos(id, youtube_id, is_deleted)')
   if (campaignId) cvQuery = cvQuery.eq('campaign_id', campaignId)
 
   const { data: cvRows } = await cvQuery
@@ -92,37 +97,41 @@ async function runDailyViewsAll(req: NextRequest) {
     })
   }
 
-  // Deduplicate by video id (same video in multiple campaigns)
-  const seen = new Set<string>()
-  const videoList = cvRows
-    .filter((r: any) => !r.videos.is_deleted)
-    .filter((r: any) => {
-      if (seen.has(r.videos.id)) return false
-      seen.add(r.videos.id)
-      return true
-    })
-    .map((r: any) => ({
-      id: r.videos.id,
-      youtube_id: r.videos.youtube_id,
-      campaign_id: r.campaign_id,
-    }))
+  // Build youtube_id → campaign entries map (skip videos without a matching videos row or with null youtube_id)
+  const ytIdMap = new Map<string, Array<{ video_id: string; campaign_id: string }>>()
+  const seenYtIds = new Set<string>()
 
-  const total = videoList.length
+  for (const raw of cvRows) {
+    const r = raw as unknown as CvRow
+    if (!r.videos) continue
+    if (r.videos.is_deleted) continue
+    if (!r.videos.youtube_id) continue
+    const key = r.videos.youtube_id
 
-  // Process all videos in batches of 50 (YouTube API limit)
+    if (!ytIdMap.has(key)) {
+      ytIdMap.set(key, [])
+      seenYtIds.add(r.videos.id)
+    }
+    ytIdMap.get(key)!.push({ video_id: r.videos.id, campaign_id: r.campaign_id })
+  }
+
+  const uniqueYtIds = Array.from(ytIdMap.keys())
+  const totalEntries = Array.from(ytIdMap.values()).reduce((s, a) => s + a.length, 0)
+
+  // Resume from previous timed-out run
+  const resumeRaw = await getSystemMetadata('daily_views_resume_offset')
+  const resumeOffset = resumeRaw ? parseInt(resumeRaw, 10) : 0
+
   const BATCH_SIZE = 50
   let updated = 0
   let deleted = 0
-  let batchErrors = 0
   let processed = 0
 
-  for (let i = 0; i < videoList.length; i += BATCH_SIZE) {
-    const batch = videoList.slice(i, i + BATCH_SIZE)
-    const ids = batch.map(r => r.youtube_id).filter(Boolean)
-    if (ids.length === 0) continue
+  try {
+    for (let i = resumeOffset; i < uniqueYtIds.length; i += BATCH_SIZE) {
+      const batchYtIds = uniqueYtIds.slice(i, i + BATCH_SIZE)
 
-    try {
-      const stats = await getViewCountsOAuth(ids)
+      const stats = await getViewCountsOAuth(batchYtIds)
 
       const viewMap = new Map<string, number>()
       const deletedIds: string[] = []
@@ -131,45 +140,88 @@ async function runDailyViewsAll(req: NextRequest) {
         else viewMap.set(stat.youtube_id, stat.view_count)
       }
 
+      // Mark deleted videos
       if (deletedIds.length > 0) {
         await supabase.from('videos').update({ is_deleted: true }).in('youtube_id', deletedIds)
         deleted += deletedIds.length
       }
 
-      // Batch update view counts
-      for (const [ytId, vc] of viewMap) {
-        await supabase.from('videos').update({ view_count: vc }).eq('youtube_id', ytId)
+      // Update view counts in bulk
+      if (viewMap.size > 0) {
+        for (const [ytId, vc] of viewMap) {
+          await supabase.from('videos').update({ view_count: vc }).eq('youtube_id', ytId)
+        }
+        updated += viewMap.size
       }
 
-      // Upsert view snapshots
-      const vsRows = batch
-        .filter(r => viewMap.has(r.youtube_id))
-        .map(r => ({
-          video_id: r.id,
-          campaign_id: r.campaign_id,
-          view_count: viewMap.get(r.youtube_id)!,
-          snapshot_date: today,
-        }))
+      // Upsert view snapshots for ALL campaign entries
+      const vsRows: Array<{
+        video_id: string
+        campaign_id: string
+        view_count: number
+        snapshot_date: string
+      }> = []
+      for (const ytId of batchYtIds) {
+        const vc = viewMap.get(ytId)
+        if (vc === undefined) continue
+        const entries = ytIdMap.get(ytId)!
+        for (const entry of entries) {
+          vsRows.push({
+            video_id: entry.video_id,
+            campaign_id: entry.campaign_id,
+            view_count: vc,
+            snapshot_date: today,
+          })
+        }
+      }
+
       if (vsRows.length > 0) {
-        await supabase.from('view_snapshots').upsert(vsRows, {
-          onConflict: 'video_id,campaign_id,snapshot_date',
-          ignoreDuplicates: false,
-        })
+        const { error: upsertErr } = await supabase
+          .from('view_snapshots')
+          .upsert(vsRows, {
+            onConflict: 'video_id,campaign_id,snapshot_date',
+            ignoreDuplicates: false,
+          })
+        if (upsertErr) {
+          // Fallback: try PK without campaign_id if the constraint doesn't include it
+          const { error: fallbackErr } = await supabase
+            .from('view_snapshots')
+            .upsert(vsRows, {
+              onConflict: 'video_id,snapshot_date',
+              ignoreDuplicates: false,
+            })
+          if (fallbackErr) throw fallbackErr
+        }
       }
 
-      updated += viewMap.size
-      processed += batch.length
-    } catch (batchErr) {
-      console.error(`Batch failed at offset ${i}:`, batchErr)
-      batchErrors++
-      processed += batch.length
-    }
-  }
+      processed += batchYtIds.length
 
-  // Clean up
-  await supabase.from('system_metadata').delete().eq('key', listKey)
-  await supabase.from('system_metadata').delete().eq('key', progressKey)
-  await setSystemMetadata('last_views_refresh', new Date().toISOString())
+      // Save resume offset
+      await supabase.from('system_metadata').upsert({
+        key: 'daily_views_resume_offset',
+        value: String(i + batchYtIds.length),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'key' })
+    }
+
+    // Clear resume state
+    await supabase.from('system_metadata').delete().eq('key', 'daily_views_resume_offset')
+    await setSystemMetadata('last_views_refresh', new Date().toISOString())
+  } catch (err) {
+    console.error('Daily views failed:', err)
+    return NextResponse.json({
+      ok: false,
+      processed,
+      updated,
+      deleted,
+      total_unique: uniqueYtIds.length,
+      total_entries: totalEntries,
+      completed: false,
+      resume_offset: processed > 0 ? processed : resumeOffset,
+      elapsed_ms: Date.now() - startTime,
+      error: err instanceof Error ? err.message : String(err),
+    }, { status: 500 })
+  }
 
   const elapsed = Date.now() - startTime
 
@@ -184,8 +236,8 @@ async function runDailyViewsAll(req: NextRequest) {
     processed,
     updated,
     deleted,
-    batch_errors: batchErrors,
-    total,
+    total_unique: uniqueYtIds.length,
+    total_entries: totalEntries,
     completed: true,
     elapsed_ms: elapsed,
   })

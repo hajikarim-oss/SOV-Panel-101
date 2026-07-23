@@ -73,6 +73,14 @@ export async function POST(req: NextRequest) {
     }
     if (!data) return NextResponse.json({ error: 'Campaign name already exists' }, { status: 409 })
 
+    // Auto-add creator as project owner
+    await queryAll(
+      `INSERT INTO project_members (campaign_id, user_id, role)
+       VALUES ($1, $2, 'owner')
+       ON CONFLICT (campaign_id, user_id) DO NOTHING`,
+      [data.id, session.id]
+    )
+
     return NextResponse.json({ campaign: data }, { status: 201 })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Unknown error'

@@ -32,13 +32,16 @@ export async function middleware(req: NextRequest) {
 
   // Role permissions routing
   if (path.startsWith('/client')) {
-    // Brand users are allowed to access client routes. Admins can also view client pages.
+    return NextResponse.next()
+  }
+
+  // Workspace hub is accessible by all authenticated users
+  if (path.startsWith('/workspace')) {
     return NextResponse.next()
   }
 
   // Any other pages are Admin only
   if (session.role !== 'admin') {
-    // Redirect non-admin user trying to access admin pages to their master client dashboard
     const clientUrl = new URL('/client', req.url)
     return NextResponse.redirect(clientUrl)
   }

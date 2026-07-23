@@ -339,8 +339,8 @@ body {
 .toggle-group {
   display: flex;
   gap: 4px;
-  background: rgba(26,115,232,0.04);
-  border: 1.5px solid rgba(26,115,232,0.08);
+  background: rgba(245,130,32,0.03);
+  border: 1.5px solid rgba(245,130,32,0.08);
   border-radius: 12px;
   padding: 4px;
 }
@@ -363,13 +363,13 @@ body {
 
 .toggle-btn.active {
   background: #FFFFFF;
-  color: var(--blue);
+  color: #F58220;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   font-weight: 700;
 }
 .toggle-btn:hover:not(.active) {
   color: var(--text-primary);
-  background: rgba(26,115,232,0.06);
+  background: rgba(245,130,32,0.05);
 }
 
 /* ═══════════════════════════════════════════════════════════════════

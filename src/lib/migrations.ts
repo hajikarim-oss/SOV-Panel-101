@@ -117,6 +117,13 @@ function getMigrationFiles(): Migration[] {
     sql: fixSchema,
   })
 
+  const projectMembers = readSchemaFile('005_project_members.sql')
+  migrations.push({
+    id: '005_project_members',
+    name: '005_project_members',
+    sql: projectMembers,
+  })
+
   return migrations
 }
 
